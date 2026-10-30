@@ -1,9 +1,15 @@
-import {copyFileSync, mkdirSync, rmSync} from 'node:fs';
+import {copyFileSync} from 'node:fs';
 import path from 'node:path';
 import {MediaError} from '../errors';
 import type {LoadedProject} from '../config/types';
 import {sha256File} from './hash';
-import {DEFAULT_ENGINE_ROOT, isInside} from '../workspace/guard';
+import {
+  assertSafePath,
+  createProjectWriteBoundary,
+  ensureSafeDirectory,
+  safeRecreateDirectory,
+  type WriteBoundary,
+} from '../workspace/writeBoundary';
 
 export type StagedMedia = {
   publicDir: string;
@@ -15,34 +21,32 @@ const toPublicPath = (relativePath: string): string => relativePath.replace(/\\/
 
 /**
  * Copies only approved, manifest-listed assets into the project's own cache.
- * Remotion receives this directory as publicDir; nothing is copied into the
- * engine repository and no HTTP service is added.
+ * The cache directory is validated and recreated through the central write
+ * boundary; no source file or other project cache is touched.
  */
 export const stageProjectMedia = (
   project: LoadedProject,
-  options: {engineRoot?: string} = {},
+  options: {engineRoot?: string; boundary?: WriteBoundary} = {},
 ): StagedMedia => {
-  const engineRoot = options.engineRoot ?? DEFAULT_ENGINE_ROOT;
-  const publicDir = path.join(project.projectDir, 'cache', 'render-public');
-  if (!isInside(project.projectDir, publicDir)) {
-    throw new MediaError('Render staging must stay inside the project workspace');
-  }
-  if (isInside(engineRoot, publicDir)) {
-    throw new MediaError('Render staging must stay outside the engine repository');
-  }
-
-  rmSync(publicDir, {recursive: true, force: true});
-  mkdirSync(publicDir, {recursive: true});
+  const boundary =
+    options.boundary ?? createProjectWriteBoundary(project, {engineRoot: options.engineRoot});
+  const publicDir = path.join(boundary.cacheRoot, 'render-public');
+  const safePublicDir = safeRecreateDirectory(boundary, publicDir);
 
   const publicAssets: Record<string, string> = {};
   for (const asset of project.assets) {
     if (asset.approval !== 'approved' || !asset.absolutePath) continue;
+    if (sha256File(asset.absolutePath) !== asset.sha256) {
+      throw new MediaError(`Approved source hash mismatch for ${asset.id}`);
+    }
+
     const relative = toPublicPath(asset.path);
-    const target = path.resolve(publicDir, relative);
-    if (!isInside(publicDir, target)) {
+    const target = path.resolve(safePublicDir, relative);
+    if (!target.startsWith(safePublicDir + path.sep)) {
       throw new MediaError(`Asset path escapes staging: ${asset.path}`);
     }
-    mkdirSync(path.dirname(target), {recursive: true});
+    ensureSafeDirectory(boundary, path.dirname(target), 'cache');
+    assertSafePath(boundary, target, {expect: 'file', subtree: 'cache'});
     copyFileSync(asset.absolutePath, target);
     if (sha256File(target) !== asset.sha256) {
       throw new MediaError(`Staged asset hash mismatch for ${asset.id}`);
@@ -50,19 +54,23 @@ export const stageProjectMedia = (
     publicAssets[asset.id] = relative;
   }
 
+  if (sha256File(project.audioPath) !== project.config.audio.sha256) {
+    throw new MediaError('Approved source audio hash mismatch');
+  }
   const audioRelative = `source/audio/${path.basename(project.audioPath)}`;
-  const audioTarget = path.resolve(publicDir, audioRelative);
-  if (!isInside(publicDir, audioTarget)) {
+  const audioTarget = path.resolve(safePublicDir, audioRelative);
+  if (!audioTarget.startsWith(safePublicDir + path.sep)) {
     throw new MediaError('Audio path escapes staging');
   }
-  mkdirSync(path.dirname(audioTarget), {recursive: true});
+  ensureSafeDirectory(boundary, path.dirname(audioTarget), 'cache');
+  assertSafePath(boundary, audioTarget, {expect: 'file', subtree: 'cache'});
   copyFileSync(project.audioPath, audioTarget);
   if (sha256File(audioTarget) !== project.config.audio.sha256) {
     throw new MediaError('Staged audio hash mismatch');
   }
 
   return {
-    publicDir,
+    publicDir: safePublicDir,
     publicAssets,
     audioPublicPath: toPublicPath(audioRelative),
   };

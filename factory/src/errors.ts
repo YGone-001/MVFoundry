@@ -19,6 +19,13 @@ export class WorkspaceError extends FactoryError {
   }
 }
 
+export class WriteBoundaryError extends WorkspaceError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WriteBoundaryError';
+  }
+}
+
 export class MediaError extends FactoryError {
   constructor(message: string) {
     super(message);

@@ -50,7 +50,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) and [docs/project-config.md](docs/project
 - Node.js 20 or newer.
 - npm with the committed lockfile.
 - Google Chrome/Chromium, or `REMOTION_BROWSER_EXECUTABLE`/`CHROME_PATH` pointing to a browser. If unset, Remotion can manage its own headless browser.
-- System FFmpeg on `PATH` for video encoding and synthetic fixture generation.
+- System FFmpeg on `PATH` for video encoding. Synthetic fixtures are generated with pure Node and do not require FFmpeg.
 - Windows, macOS or Linux with standard path handling.
 
 ## 5. Installation
@@ -76,7 +76,9 @@ npm run typecheck
 npm test
 ```
 
-`npm test` regenerates synthetic fixtures, compiles the engine and runs the test suite. Tests never require a private song or production asset.
+`npm test` regenerates synthetic fixtures, compiles the engine and runs the test suite. Tests never require a private song or production asset, and they do not require FFmpeg.
+
+CI runs the same checks on Linux (Node 20 and 22) and Windows (Node 20, including junction behavior), then runs the publication and Git media audits. See `.github/workflows/engine-ci.yml`. The dependency advisory review is in [docs/dependency-security.md](docs/dependency-security.md).
 
 ## 7. Creating a synthetic local project
 
@@ -116,14 +118,19 @@ npm run render:project -- --project synthetic-layered-demo --mode still --frame 
 
 Set `REMOTION_BROWSER_EXECUTABLE` or `CHROME_PATH` if Remotion cannot locate a browser. The render script writes frames, caches, reports and outputs only inside the external project's `cache/` and `renders/` directories.
 
+`--out` is restricted to the project's `renders/` directory. A relative override must be a single filename (for example `--out take-01.mp4`); an absolute override must be a direct child of `renders/`. Traversal, other projects, the engine repository and linked destinations are rejected before staging or rendering. See [docs/workspace-safety.md](docs/workspace-safety.md).
+
 ## 10. External workspace safety policy
 
 - Song-specific data never belongs in this repository.
 - Workspace roots inside the repository are rejected.
 - Manifest paths are relative and canonicalized; traversal and links that escape the project are rejected.
 - Only approved, hash-verified assets are staged.
+- All render/staging/cache writes go through a central write boundary tied to the canonical project root.
+- Explicit output overrides are limited to direct children of the project `renders/` directory.
+- Cache cleanup is limited to strict descendants of `<project>/cache`; linked entries and protected sources are never deleted.
 - No public HTTP service is created for media.
-- `.gitignore` is defense in depth; the workspace guard is the primary protection.
+- `.gitignore` is defense in depth; the workspace guard and write boundary are the primary protections.
 
 ## 11. Supported renderers versus planned renderers
 
@@ -143,5 +150,6 @@ External project-local TypeScript scene loading is **not implemented**. P0 proje
 - [TypeScript](https://www.typescriptlang.org/) — Apache-2.0.
 - [FFmpeg](https://ffmpeg.org/) — LGPL/GPL depending on the build; this repository does not bundle FFmpeg.
 - [Remotion Skills](https://github.com/remotion-dev/skills) — installed separately, not vendored here.
+- GitHub Actions standard actions (`actions/checkout`, `actions/setup-node`) — used only in CI, not vendored.
 
 The synthetic fixtures are generated locally and contain no third-party media. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for license and provenance notes.

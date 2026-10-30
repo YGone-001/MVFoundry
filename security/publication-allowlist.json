@@ -15,6 +15,7 @@
     "factory/tsconfig.json"
   ],
   "directories": [
+    ".github/workflows",
     "docs",
     "factory/src",
     "factory/tests",

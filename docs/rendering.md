@@ -30,8 +30,15 @@ Requirements:
 
 - `MV_WORKSPACE_ROOT` points to an external workspace.
 - The project is validated and its approved media is staged into the project cache.
-- System FFmpeg is on `PATH`.
+- System FFmpeg is on `PATH` for video encoding; stills do not need FFmpeg.
 - `REMOTION_BROWSER_EXECUTABLE` or `CHROME_PATH` can point to a browser; otherwise Remotion manages its own.
+
+## Output override policy
+
+- Default output is inside `<project>/renders/`.
+- `--out` may be a single relative filename (for example `take-01.mp4`) or an absolute direct child of `renders/`.
+- Nested relative paths, traversal, other projects, the engine repository, linked destinations and source audio/assets are rejected before staging or rendering.
+- Rejected overrides produce no output file; tests cover both helper and real CLI behavior.
 
 ## Pipeline
 
@@ -51,7 +58,7 @@ Requirements:
 - Report: external `reports/render-<projectId>-<mode>.json`.
 - Frames and temp data: external `cache/`.
 
-No output is written into this repository.
+No output is written into this repository. Cache recreation is restricted to strict descendants of `<project>/cache`; `render-public`, frames, sequences and temp are validated through the write boundary before any deletion. Node path APIs cannot eliminate concurrent filesystem races; see `docs/workspace-safety.md`.
 
 ## Why `renderFrames` plus system FFmpeg
 

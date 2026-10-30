@@ -31,10 +31,14 @@ Owns the generic frame-to-pixels engine in `factory/`. Song-specific scenes and 
 4. Keep output fps, dimensions and duration in project config. Do not hardcode 4919, 204.96 s, 480x270, 12fps or ten scenes globally.
 5. Render through the typed registry. Add new renderers by registration, not by changing the frame clock.
 6. Use the project-local staging directory as Remotion `publicDir`; never copy media into the engine repository.
-7. Preserve soundtrack timing. P0 stages and muxes the approved audio unchanged.
-8. Render lossless frames and encode deterministically; verify actual output with ffprobe.
-9. Keep the legacy compositions registered and do not rewrite S01-S10 during engine work.
-10. Add or update frame-boundary and sampling-isolation tests before replacing routing logic.
+7. Route all render output, staging, cache recreation and report writes through `factory/src/workspace/writeBoundary.ts`.
+8. Keep default output under `<project>/renders`. Allow only a single filename relative to renders or an absolute direct child of renders for `--out`; reject traversal, other projects, engine paths and linked destinations before writing.
+9. Restrict destructive cleanup to strict descendants of `<project>/cache`; never delete the cache root, project root, source audio or approved assets.
+10. Preserve soundtrack timing. P0 stages and muxes the approved audio unchanged.
+11. Render lossless frames and encode deterministically; verify actual output with ffprobe.
+12. Keep the legacy compositions registered and do not rewrite S01-S10 during engine work.
+13. Add or update frame-boundary, write-boundary and sampling-isolation tests before replacing routing logic.
+14. Keep CI engine-only; do not upload media or production artifacts.
 
 ## Output contract
 
@@ -62,6 +66,9 @@ Owns the generic frame-to-pixels engine in `factory/`. Song-specific scenes and 
 - Aspect ratios, fps and durations are profile-driven.
 - A new renderer can be registered without changing the frame clock.
 - Local assets resolve only from the approved manifest/staging.
+- Every project write path passes the central boundary; no ad-hoc output or cleanup path exists.
+- Unsafe `--out` values fail before any output file or staging write.
+- Cache cleanup cannot reach sources, the project root or another project's cache.
 - Short render has the expected codec, dimensions, frame count and audio timing.
 - Legacy compositions and scene code remain available and unchanged.
 
@@ -70,5 +77,6 @@ Owns the generic frame-to-pixels engine in `factory/`. Song-specific scenes and 
 - Missing workspace/project config: fail closed; do not fall back into the engine repo.
 - Invalid frame or coverage: throw a domain/timeline error and stop.
 - Missing or unapproved asset: refuse to render.
+- Unsafe output or cleanup path: fail before writing; do not fall back to a default or a repository path.
 - Unimplemented video/hybrid adapter: throw a typed placeholder error; do not fake output.
 - Render tool failure: report NOT RUN with the exact command and error; never claim success.

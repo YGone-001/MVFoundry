@@ -5,14 +5,7 @@
 // Requires: npm run factory:build.
 
 import {execFileSync} from 'node:child_process';
-import {
-  mkdirSync,
-  readdirSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import {readdirSync, renameSync, statSync, writeFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -49,20 +42,45 @@ if (!['video', 'still'].includes(mode)) {
 
 const {loadProject} = require('../dist/src/project/loadProject.js');
 const {stageProjectMedia} = require('../dist/src/media/stagePublic.js');
+const {
+  assertSafePath,
+  createProjectWriteBoundary,
+  ensureSafeDirectory,
+  resolveRenderOutputPath,
+  safeRecreateDirectory,
+} = require('../dist/src/workspace/writeBoundary.js');
 
 const project = loadProject(projectId, {workspaceRoot, engineRoot: repoRoot});
-const staged = stageProjectMedia(project, {engineRoot: repoRoot});
+if (mode === 'still' && (!Number.isInteger(stillFrame) || stillFrame < 0 || stillFrame >= project.durationInFrames)) {
+  throw new Error(`Still frame ${stillFrame} is outside [0, ${project.durationInFrames})`);
+}
+
+const boundary = createProjectWriteBoundary(project, {engineRoot: repoRoot});
+// Resolve and validate --out before any staging, cache or render write occurs.
+const output = resolveRenderOutputPath(boundary, {
+  mode,
+  projectId,
+  frame: stillFrame,
+  requested: projectOut,
+});
+const reportsDir = ensureSafeDirectory(boundary, path.join(boundary.projectRoot, 'reports'), 'project');
+const reportPath = assertSafePath(
+  boundary,
+  path.join(reportsDir, `render-${projectId}-${mode}.json`),
+  {expect: 'file', subtree: 'project'},
+);
+const tmpDir = ensureSafeDirectory(boundary, path.join(boundary.cacheRoot, 'tmp'), 'cache');
+
+process.env.TMP = tmpDir;
+process.env.TEMP = tmpDir;
+process.env.TMPDIR = tmpDir;
+
+const staged = stageProjectMedia(project, {engineRoot: repoRoot, boundary});
 const renderProject = {
   ...project.renderProject,
   publicAssets: staged.publicAssets,
   audioPublicPath: staged.audioPublicPath,
 };
-
-const tmpDir = path.join(project.projectDir, 'cache', 'tmp');
-mkdirSync(tmpDir, {recursive: true});
-process.env.TMP = tmpDir;
-process.env.TEMP = tmpDir;
-process.env.TMPDIR = tmpDir;
 
 const {bundle} = await import('@remotion/bundler');
 const {getCompositions, openBrowser, renderFrames, renderStill} = await import(
@@ -73,17 +91,6 @@ const {getCompositions, openBrowser, renderFrames, renderStill} = await import(
 // own headless shell.
 const browserExecutable =
   process.env.REMOTION_BROWSER_EXECUTABLE ?? process.env.CHROME_PATH ?? null;
-
-const rendersDir = path.join(project.projectDir, 'renders');
-const reportsDir = path.join(project.projectDir, 'reports');
-mkdirSync(rendersDir, {recursive: true});
-mkdirSync(reportsDir, {recursive: true});
-
-const output =
-  projectOut ??
-  (mode === 'still'
-    ? path.join(rendersDir, `${projectId}-still-${String(stillFrame).padStart(4, '0')}.png`)
-    : path.join(rendersDir, `${projectId}-render.mp4`));
 
 const serveUrl = await bundle({
   entryPoint: path.join(repoRoot, 'factory', 'src', 'entry.tsx'),
@@ -115,9 +122,6 @@ try {
   }
 
   if (mode === 'still') {
-    if (!Number.isInteger(stillFrame) || stillFrame < 0 || stillFrame >= project.durationInFrames) {
-      throw new Error(`Still frame ${stillFrame} is outside [0, ${project.durationInFrames})`);
-    }
     await renderStill({
       composition,
       serveUrl,
@@ -138,12 +142,14 @@ try {
       throw new Error(`Invalid frame range ${frameRange} for ${project.durationInFrames} frames`);
     }
 
-    const frameDir = path.join(project.projectDir, 'cache', 'frames', `${projectId}-${start}-${end}`);
-    const sequenceDir = path.join(project.projectDir, 'cache', 'sequence', `${projectId}-${start}-${end}`);
-    rmSync(frameDir, {recursive: true, force: true});
-    rmSync(sequenceDir, {recursive: true, force: true});
-    mkdirSync(frameDir, {recursive: true});
-    mkdirSync(sequenceDir, {recursive: true});
+    const frameDir = safeRecreateDirectory(
+      boundary,
+      path.join(boundary.cacheRoot, 'frames', `${projectId}-${start}-${end}`),
+    );
+    const sequenceDir = safeRecreateDirectory(
+      boundary,
+      path.join(boundary.cacheRoot, 'sequence', `${projectId}-${start}-${end}`),
+    );
 
     const frameResult = await renderFrames({
       composition,
@@ -241,10 +247,7 @@ try {
     encoder: mode === 'video' ? 'system-ffmpeg' : 'remotion-render-still',
     networkActions: ['none; local bundle and local files only'],
   };
-  writeFileSync(
-    path.join(reportsDir, `render-${projectId}-${mode}.json`),
-    JSON.stringify(report, null, 2),
-  );
+  writeFileSync(reportPath, JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
 } finally {
   await browser.close({silent: true});

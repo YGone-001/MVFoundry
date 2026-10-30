@@ -40,6 +40,15 @@ Do not treat plans, prior reports or user summaries as proof of the current file
 - Staging, frames, caches, reports and renders stay inside the external project.
 - No public HTTP service may expose local media.
 
+### Safe filesystem writes
+
+- All project writes go through `factory/src/workspace/writeBoundary.ts`; do not add ad-hoc `rmSync`, `writeFileSync` or `copyFileSync` paths that bypass it.
+- Render output defaults to `<project>/renders/`. `--out` accepts a single filename relative to renders or an absolute direct child of renders; reject traversal, other projects, the engine repository and linked destinations before writing.
+- Staging may write only under `<project>/cache/render-public`; cleanup may recreate only strict descendants of `<project>/cache`.
+- Never delete the project cache root, the project root, source audio or approved source assets.
+- Validate existing ancestors and destinations; reject symlinks and Windows junctions. Ordinary Node.js filesystem APIs cannot guarantee protection against concurrent malicious mutation; do not claim race-free security.
+- Test negative paths and verify no output was written.
+
 ### Timeline and rendering
 
 - Integer output frames are the canonical editing clock; scene ranges are half-open `[startFrame, endFrame)`.
@@ -62,6 +71,7 @@ Do not treat plans, prior reports or user summaries as proof of the current file
 - No paid API, model call, upload, remote deployment or third-party transmission of local media.
 - No secrets, credentials, tokens or private absolute paths in source, docs or fixtures.
 - Use the publication allowlist and audit before staging; never `git add .` or `git add -A`.
+- CI is engine-only: no production workspace, media artifacts or paid services. See `.github/workflows/engine-ci.yml`.
 
 ## Commands
 

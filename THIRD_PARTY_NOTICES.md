@@ -11,6 +11,7 @@ MVFoundry source does not vendor third-party source code or media. Dependencies 
 | TypeScript | build/type checking | Apache-2.0 |
 | FFmpeg (system) | video encoding and synthetic image fixture generation | LGPL/GPL depending on the build; not bundled by this repository |
 | Remotion Skills (official) | optional agent guidance | Upstream content, installed separately; not vendored here |
+| GitHub Actions (`actions/checkout`, `actions/setup-node`) | CI checkout and Node setup | Upstream actions; not vendored here; subject to their repository licenses |
 
 ## Transitive dependencies
 
