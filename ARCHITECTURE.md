@@ -109,7 +109,7 @@ External project-local TypeScript scene modules are not loaded in P0. Projects u
 - No unseeded randomness or wall-clock time in drawing.
 - Synthetic fixtures are generated deterministically by a committed pure-Node script; binaries are ignored by Git and no FFmpeg is required for tests.
 - Tests cover configuration, workspace isolation, write-boundary output restrictions, staging, cleanup, junction behavior, frame ownership, sampling isolation, multi-project loading, Git audit and provider absence.
-- GitHub Actions validates Linux Node 20/22 and Windows Node 20, runs typecheck/tests, and runs the publication and Git media audits. No artifacts or production media are uploaded.
+- GitHub Actions validates Windows with Node 20, runs typecheck/tests, and runs the publication and Git media audits. No artifacts or production media are uploaded.
 - Render metadata must be verified with actual output, not source inference.
 
 ## 11. Known boundaries

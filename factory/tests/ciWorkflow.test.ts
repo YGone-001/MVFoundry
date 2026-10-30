@@ -22,8 +22,8 @@ test('G12: workflow runs the required engine and security commands', () => {
   ]) {
     assert.ok(workflow.includes(command), `workflow is missing ${command}`);
   }
-  assert.match(workflow, /ubuntu-latest/);
   assert.match(workflow, /windows-latest/);
-  assert.match(workflow, /node: \[20, 22\]/);
+  assert.match(workflow, /node-version: 20/);
+  assert.doesNotMatch(workflow, /ubuntu-latest|node: \[/);
   assert.doesNotMatch(workflow, /upload-artifact|git push|secrets\./);
 });

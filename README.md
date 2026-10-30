@@ -51,7 +51,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) and [docs/project-config.md](docs/project
 - npm with the committed lockfile.
 - Google Chrome/Chromium, or `REMOTION_BROWSER_EXECUTABLE`/`CHROME_PATH` pointing to a browser. If unset, Remotion can manage its own headless browser.
 - System FFmpeg on `PATH` for video encoding. Synthetic fixtures are generated with pure Node and do not require FFmpeg.
-- Windows, macOS or Linux with standard path handling.
+- Windows 10/11 x64. The engine and CI are currently maintained for Windows only.
 
 ## 5. Installation
 
@@ -78,7 +78,7 @@ npm test
 
 `npm test` regenerates synthetic fixtures, compiles the engine and runs the test suite. Tests never require a private song or production asset, and they do not require FFmpeg.
 
-CI runs the same checks on Linux (Node 20 and 22) and Windows (Node 20, including junction behavior), then runs the publication and Git media audits. See `.github/workflows/engine-ci.yml`. The dependency advisory review is in [docs/dependency-security.md](docs/dependency-security.md).
+CI runs the same checks on Windows with Node 20, including junction behavior, then runs the publication and Git media audits. See `.github/workflows/engine-ci.yml`. The dependency advisory review is in [docs/dependency-security.md](docs/dependency-security.md).
 
 ## 7. Creating a synthetic local project
 
