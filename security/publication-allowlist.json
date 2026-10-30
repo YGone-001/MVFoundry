@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "files": [
+    "README.md",
+    "AGENTS.md",
+    "ARCHITECTURE.md",
+    "THIRD_PARTY_NOTICES.md",
+    ".gitignore",
+    ".gitattributes",
+    "package.json",
+    "package-lock.json",
+    "tsconfig.json",
+    "remotion.config.ts",
+    "factory/README.md",
+    "factory/tsconfig.json"
+  ],
+  "directories": [
+    "docs",
+    "factory/src",
+    "factory/tests",
+    "factory/scripts",
+    "factory/examples/projects",
+    ".agents/skills/music-video-director",
+    ".agents/skills/visual-identity-continuity",
+    ".agents/skills/ai-shot-production",
+    ".agents/skills/remotion-mv-compositor",
+    ".agents/skills/music-video-quality-gate",
+    "security"
+  ],
+  "generatedIgnoredGlobs": [
+    "factory/examples/**/source/audio/*.wav",
+    "factory/examples/**/assets/images/*.png"
+  ],
+  "mediaExtensions": [
+    ".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus",
+    ".mp4", ".mov", ".mkv", ".webm", ".avi",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp"
+  ],
+  "maxFileBytes": 2097152,
+  "allowedUrlHosts": [
+    "registry.npmjs.org",
+    "github.com",
+    "remotion.dev",
+    "www.remotion.dev",
+    "remotion.pro",
+    "react.dev",
+    "www.typescriptlang.org",
+    "ffmpeg.org",
+    "opencollective.com",
+    "tidelift.com",
+    "patreon.com",
+    "dotenvx.com"
+  ]
+}

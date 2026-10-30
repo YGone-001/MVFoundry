@@ -1,0 +1,34 @@
+{
+  "name": "mvfoundry",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local-first, agent-driven AI music video production framework powered by Remotion.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc -p factory/tsconfig.json --noEmit",
+    "build": "tsc -p factory/tsconfig.json",
+    "fixtures": "node factory/scripts/generate-fixtures.mjs",
+    "test": "npm run fixtures && npm run build && node --test factory/dist/tests",
+    "compositions": "remotion compositions factory/src/entry.tsx",
+    "seed:examples": "npm run build && npm run fixtures && node factory/scripts/seed-workspace.mjs",
+    "render:project": "npm run build && node factory/scripts/render-project.mjs",
+    "audit:git": "npm run build && node factory/scripts/audit-git.mjs",
+    "audit:publication": "node security/audit-publication.mjs"
+  },
+  "dependencies": {
+    "@remotion/bundler": "4.0.539",
+    "@remotion/cli": "4.0.539",
+    "@remotion/renderer": "4.0.539",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "remotion": "4.0.539"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.43",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "typescript": "5.9.3"
+  }
+}

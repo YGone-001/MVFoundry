@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "projectId": "synthetic-pixel-demo",
+  "song": {
+    "title": "Synthetic Pixel Demo",
+    "artist": "Factory Fixtures"
+  },
+  "audio": {
+    "path": "source/audio/tone-2s.wav",
+    "sha256": "f6adfd0f098f1022c68d45ae9cfc5f3d88c1e24fdf07c109cd0abb8a5a773fa2",
+    "durationSeconds": 2,
+    "durationPolicy": "round",
+    "format": "wav-pcm"
+  },
+  "lyrics": {
+    "language": "none",
+    "path": null
+  },
+  "narrative": {
+    "mode": "abstract"
+  },
+  "visual": {
+    "styleProfile": "pixel-art",
+    "defaultRenderer": "pixel-canvas",
+    "pixel": {
+      "internalWidth": 480,
+      "internalHeight": 270,
+      "samplingFps": 12
+    }
+  },
+  "output": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24
+  },
+  "cues": [
+    {
+      "id": "CUE-01",
+      "frame": 0,
+      "timeSeconds": 0,
+      "source": "synthetic",
+      "label": "start"
+    },
+    {
+      "id": "CUE-02",
+      "frame": 24,
+      "timeSeconds": 1,
+      "source": "synthetic",
+      "label": "mid"
+    },
+    {
+      "id": "CUE-03",
+      "frame": 48,
+      "timeSeconds": 2,
+      "source": "synthetic",
+      "label": "end"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "CH-01",
+      "title": "Pixel A",
+      "startFrame": 0,
+      "endFrame": 24,
+      "shots": [
+        {
+          "id": "SHOT-01",
+          "startFrame": 0,
+          "endFrame": 24,
+          "renderer": "pixel-canvas",
+          "params": {
+            "background": "#0B1B2B",
+            "accent": "#2EC4B6",
+            "secondary": "#FF9F1C",
+            "bars": 7,
+            "motion": 2.5
+          }
+        }
+      ]
+    },
+    {
+      "id": "CH-02",
+      "title": "Pixel B",
+      "startFrame": 24,
+      "endFrame": 48,
+      "shots": [
+        {
+          "id": "SHOT-02",
+          "startFrame": 24,
+          "endFrame": 48,
+          "renderer": "pixel-canvas",
+          "params": {
+            "background": "#123044",
+            "accent": "#FF9F1C",
+            "secondary": "#E9E3D2",
+            "bars": 5,
+            "motion": 4
+          }
+        }
+      ]
+    }
+  ],
+  "assets": [],
+  "permissions": {
+    "externalGeneration": false,
+    "localOnly": true,
+    "allowNetwork": false
+  },
+  "render": {
+    "codec": "h264",
+    "pixelFormat": "yuv420p",
+    "colorSpace": "bt709",
+    "imageFormat": "png"
+  }
+}
