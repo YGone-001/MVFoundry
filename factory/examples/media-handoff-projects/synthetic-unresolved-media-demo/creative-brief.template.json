@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "projectId": "synthetic-unresolved-media-demo",
+  "source": "user",
+  "approval": "approved",
+  "concept": "A sigil plate drifts over captured water until a local asset is actually approved.",
+  "narrativeMode": "abstract",
+  "moodProgression": ["waiting"],
+  "visualStyle": "hybrid plate over captured water",
+  "aspectRatio": "1:1",
+  "palette": ["#141024", "#F5D6BA", "#8AA6A1"],
+  "characters": [],
+  "setting": "still water inside a square frame",
+  "continuityRules": ["The sigil stays centred and unbroken."],
+  "pacing": {"preferredShotFrames": 75, "minShotFrames": 20, "maxShotFrames": 75, "allowBeatCuts": false},
+  "cameraLanguage": ["locked square frame"],
+  "transitions": ["no cut"],
+  "approvedReferences": [],
+  "excludedElements": ["faces", "text overlays"],
+  "productionConstraints": [
+    "The shot stays blocked until both media slots are attached and approved."
+  ],
+  "preferredRenderers": ["hybrid"],
+  "rendererDirectives": [
+    {
+      "id": "DIR-HYBRID-SIGIL",
+      "renderer": "hybrid",
+      "continuityIds": ["CONT-SIGIL", "CONT-STYLE-01"],
+      "media": {
+        "kind": "hybrid",
+        "backgroundSlot": "bg",
+        "sourceStartFrames": 0,
+        "fit": "cover",
+        "positionX": 0,
+        "positionY": 0,
+        "scale": 1,
+        "layers": [
+          {"slot": "sigil", "order": 0, "opacity": 0.9, "fit": "contain", "positionX": 0, "positionY": 0, "scale": 1, "visibleFromFrame": 0, "visibleToFrame": 75}
+        ],
+        "overlay": {"kind": "orbits", "intensity": 0.3, "color": "#8AA6A1"}
+      }
+    }
+  ],
+  "requiredAssets": [],
+  "assumptions": ["No asset is fabricated by the compiler; an absent file keeps the shot blocked."]
+}

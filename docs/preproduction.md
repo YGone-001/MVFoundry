@@ -240,7 +240,97 @@ The command loads `preproduction/project-candidate.json` through the same isolat
 
 `npm run preproduction:verify` performs the local acceptance workflow for all four projects and writes `reports/preproduction-evidence.json` per project, including the Project A2 timing trace from ground-truth rhythm to decoded cut-frame verification.
 
-## 11. Limitations
+## 12. Media-aware shots, continuity and asset handoff
+
+### Renderer directives
+
+`creative-brief.rendererDirectives` is an optional ordered list applied per shot
+(`shot index % directives.length`), so one storyboard can mix pixel Canvas, layered
+Canvas, project modules, Video and Hybrid shots. Each directive names a registered
+or declared renderer, the continuity IDs it carries, and — for `video`/`hybrid` —
+the planned media. Without directives every shot uses the single preferred renderer,
+which is the accepted P1-E-A behaviour.
+
+Planned media reuses the accepted P1-C vocabulary and stays **intent**: it names
+requirement *slots*, never asset IDs.
+
+```json
+{"id": "DIR-VIDEO", "renderer": "video", "continuityIds": ["CONT-LOC-HARBOUR"],
+ "media": {"kind": "video", "backgroundSlot": "bg", "sourceStartFrames": 30,
+           "fit": "cover", "positionX": 0, "positionY": 0, "scale": 1}}
+```
+
+A Hybrid directive adds `layers[{slot, order, opacity, fit, position*, scale,
+visibleFromFrame, visibleToFrame}]` (shot-local frames, `visibleToFrame` exclusive)
+and `overlay{kind: rain|orbits|scan, intensity, color}`. Validation rejects a
+directive whose media kind differs from its renderer, a missing or non-media layer
+list, duplicate layer order or slot, a slot equal to `backgroundSlot`, out-of-range
+opacity/intensity/scale, and visibility beyond the real shot length once the plan
+exists. A media shot whose requirement is unfulfilled **stays blocked**; it is never
+silently downgraded to Canvas.
+
+Each slot becomes its own `AssetRequirement` with `mediaSlot` set: a `video`
+background requirement sized to `sourceStartFrames + shot length`, and one `layer`
+requirement per plate with `alphaRequired: true`.
+
+### Continuity
+
+`preproduction/continuity.json` is a versioned, project-local record of entries with
+`id`, `identity`, `kind` (character, location, appearance, prop, style, palette,
+lighting, camera), `description`, `shotIds`, optional approved `referenceAssetId`,
+flat `attributes`, `constraints`, `exclusions`, `approval`, `revision` and optional
+`supersedes`. This is declarative checking only — no face, character or image
+similarity analysis exists.
+
+`continuity` reports findings; three are fatal and block storyboards:
+`unknown-reference`, `unapproved-reference` and `shot-declaration-mismatch` (an entry
+must declare exactly the shots that reference it). `missing-reference-asset` is
+reported for approved character/location/appearance/prop entries without a reference
+asset. Two approved entries sharing one `identity`+`kind` are rejected as
+contradictory unless one explicitly supersedes the other with a higher revision —
+that is how an intentional appearance change is approved. The file is never rewritten
+by planning or re-analysis.
+
+### Production tasks and handoff
+
+`tasks` writes `preproduction/production-tasks.json`: one task per requirement with
+target dimensions/aspect/duration, transparency, renderer, continuity and approved
+reference IDs, provenance requirements, concrete acceptance criteria, and status.
+Production status distinguishes `needed`, `in-production`, `delivered`,
+`under-review`, `approved` and `rejected`; exit code 2 while anything is unresolved.
+A task is a work order, never an asset.
+
+`attach-asset --requirement REQ-001 --asset-id VID-X --path intake/video/x.mp4
+--provenance "..." --rights "..."` resolves the path through the workspace guard
+(rejecting absolute, traversal and cross-project or symlink/junction escapes),
+requires the file to exist, computes SHA256, probes it with `probeVideo` or
+`probeLayerPng` (MP4/H.264/constant frame rate/zero rotation; alpha-capable PNG),
+checks renderer compatibility and that the source covers the planned in-point plus
+shot length, and writes `preproduction/asset-intake.json` with `review: "pending"`.
+Passing every technical check does **not** approve anything.
+
+`review-asset --decision start-review|approve|reject --notes "..."` is the only path
+to `approved`. It re-reads the file, re-computes SHA256 and refuses if the bytes
+changed, and rejects a record whose requirement fingerprint no longer matches.
+
+Fingerprints bind a fulfillment to the exact requirement shape
+(`shotIds|renderer|kind|mediaSlot|duration|aspect|description`). If the plan is
+re-cut, the old record becomes **stale**: the requirement returns to unfulfilled, the
+storyboard is not render-ready and compilation stays blocked rather than binding
+previous bytes to a new shot.
+
+### Compilation with media
+
+The compiler binds approved intake assets into typed `shot.media` — `VideoSourceConfig`
+or full `ShotHybridMedia` — with `muted: true`, `endBehavior: "reject"` and a
+frame-aligned `sourceStartSeconds`, and adds intake-only assets to the *candidate's*
+asset table only. `project.json` is never modified. Readiness is recomputed from live
+fulfilment at validation time, so an already approved storyboard becomes render-ready
+once its assets are approved, without rewriting the approved document. The existing
+project validator, loader, `probeVideo`/`probeLayerPng` and `assertMediaTimelines`
+remain the final authority at render; the engine never fabricates a media reference.
+
+## 13. Limitations
 
 - Beat analysis is constant-tempo energy/autocorrelation plus phase selection; no BPM, meter, downbeat or section inference is authoritative.
 - An onset at frame 0 is outside the detection domain and is reported as `frame-zero-onset-not-detected`; a start anchor must come from an approved manual annotation.

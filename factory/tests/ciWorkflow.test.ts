@@ -91,6 +91,8 @@ test('G12: workflow runs the required engine and security commands', () => {
     'npm run audio:verify',
     'npm run preproduction:seed',
     'npm run preproduction:verify',
+    'npm run handoff:seed',
+    'npm run handoff:verify',
     'npm run audit:publication',
     'npm run audit:git',
   ]) {
@@ -143,6 +145,8 @@ test('G12: workspace is initialized from RUNNER_TEMP via GITHUB_ENV before seedi
   const audioVerifyIndex = names.indexOf('Verify multi-format audio, multitrack mix and cues');
   const preproductionSeedIndex = names.indexOf('Seed synthetic preproduction workspace');
   const preproductionVerifyIndex = names.indexOf('Verify preproduction planning and storyboard preview');
+  const handoffSeedIndex = names.indexOf('Seed synthetic media-handoff workspace');
+  const handoffVerifyIndex = names.indexOf('Verify media-aware storyboards and asset handoff');
   assert.ok(provisionIndex >= 0 && ffmpegIndex > provisionIndex, 'FFmpeg provisioning must precede verification');
   assert.ok(typecheckIndex > ffmpegIndex, 'FFmpeg must be provisioned and verified before typecheck');
   assert.ok(testIndex > typecheckIndex, 'tests must follow typecheck');
@@ -157,8 +161,10 @@ test('G12: workspace is initialized from RUNNER_TEMP via GITHUB_ENV before seedi
   assert.ok(audioVerifyIndex > audioSeedIndex, 'audio verification must follow audio seeding');
   assert.ok(preproductionSeedIndex > audioVerifyIndex, 'preproduction seeding must follow audio verification');
   assert.ok(preproductionVerifyIndex > preproductionSeedIndex, 'preproduction verification must follow seeding');
-  assert.ok(names.indexOf('Publication audit') > preproductionVerifyIndex, 'publication audit must follow preproduction verification');
-  assert.ok(names.indexOf('Git media audit') > preproductionVerifyIndex, 'Git media audit must follow preproduction verification');
+  assert.ok(handoffSeedIndex > preproductionVerifyIndex, 'media-handoff seeding must follow preproduction verification');
+  assert.ok(handoffVerifyIndex > handoffSeedIndex, 'media-handoff verification must follow its seeding');
+  assert.ok(names.indexOf('Publication audit') > handoffVerifyIndex, 'publication audit must follow media-handoff verification');
+  assert.ok(names.indexOf('Git media audit') > handoffVerifyIndex, 'Git media audit must follow media-handoff verification');
   assert.ok(!names.includes('Record media/audio render limitation'), 'audio acceptance must not be skippable');
 
   const provision = steps[provisionIndex];
@@ -192,6 +198,8 @@ test('G12: workspace is initialized from RUNNER_TEMP via GITHUB_ENV before seedi
     ['audio verify', audioVerify],
     ['preproduction seed', preproductionSeed],
     ['preproduction verify', preproductionVerify],
+    ['media-handoff seed', steps[handoffSeedIndex]],
+    ['media-handoff verify', steps[handoffVerifyIndex]],
   ] as const) {
     assert.doesNotMatch(step.lines.join('\n'), /^\s*if:/m, `${name} must not be conditionally skipped`);
   }

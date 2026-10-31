@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "projectId": "synthetic-hybrid-continuity-demo",
+  "bpm": null,
+  "beatAnchors": [
+    {"id": "ANCHOR-01", "frame": 0, "timeSeconds": 0, "source": "user", "approval": "approved"},
+    {"id": "ANCHOR-02", "frame": 48, "timeSeconds": 2, "source": "user", "approval": "approved", "notes": "Approved appearance change lands on this boundary."}
+  ],
+  "cutCues": [],
+  "sections": [
+    {"id": "SEC-01", "label": "inbound", "startFrame": 0, "endFrame": 48, "source": "user", "approval": "approved"},
+    {"id": "SEC-02", "label": "outbound", "startFrame": 48, "endFrame": 96, "source": "user", "approval": "approved"}
+  ]
+}

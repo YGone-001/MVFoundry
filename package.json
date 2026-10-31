@@ -20,6 +20,8 @@
     "preproduction": "npm run build && node factory/scripts/preproduction.mjs",
     "preproduction:seed": "npm run build && node factory/scripts/seed-preproduction-workspace.mjs",
     "preproduction:verify": "npm run build && node factory/scripts/verify-preproduction.mjs",
+    "handoff:seed": "npm run build && node factory/scripts/seed-media-handoff-workspace.mjs",
+    "handoff:verify": "npm run build && node factory/scripts/verify-media-handoff.mjs",
     "render:project": "npm run build && node factory/scripts/render-project.mjs",
     "verify:modules": "npm run build && node factory/scripts/verify-module-render.mjs",
     "audit:git": "npm run build && node factory/scripts/audit-git.mjs",

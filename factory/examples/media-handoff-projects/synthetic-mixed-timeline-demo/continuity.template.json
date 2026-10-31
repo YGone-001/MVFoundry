@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "projectId": "synthetic-mixed-timeline-demo",
+  "revision": 1,
+  "entries": [
+    {
+      "id": "CONT-STYLE-01",
+      "identity": "harbour-night-palette",
+      "kind": "style",
+      "description": "Dark tiled harbour at night: cyan water, amber light, horizon held in the upper third.",
+      "shotIds": ["SHOT-001", "SHOT-002", "SHOT-003", "SHOT-004"],
+      "referenceAssetId": null,
+      "attributes": {"palette": "#101820 #7BDFF2 #F2B705", "timeOfDay": "night", "contrast": "low"},
+      "constraints": ["No pure white highlights."],
+      "exclusions": ["Daylight interiors"],
+      "approval": "approved",
+      "revision": 1,
+      "supersedes": null
+    },
+    {
+      "id": "CONT-LOC-HARBOUR",
+      "identity": "harbour-mouth",
+      "kind": "location",
+      "description": "The same harbour mouth seen in captured footage, tiles leading to open water.",
+      "shotIds": ["SHOT-002", "SHOT-004"],
+      "referenceAssetId": null,
+      "attributes": {"surface": "wet tile", "waterline": "upper third"},
+      "constraints": ["Keeps the tile grid visible in the lower half."],
+      "exclusions": ["Boats, people, signage"],
+      "approval": "approved",
+      "revision": 1,
+      "supersedes": null
+    }
+  ]
+}

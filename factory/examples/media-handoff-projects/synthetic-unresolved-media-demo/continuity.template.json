@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "projectId": "synthetic-unresolved-media-demo",
+  "revision": 1,
+  "entries": [
+    {
+      "id": "CONT-STYLE-01",
+      "identity": "square-water-look",
+      "kind": "style",
+      "description": "Still water in a square frame, cool key with one warm accent.",
+      "shotIds": ["SHOT-001"],
+      "referenceAssetId": null,
+      "attributes": {"palette": "#141024 #F5D6BA", "motion": "slow"},
+      "constraints": [],
+      "exclusions": [],
+      "approval": "approved",
+      "revision": 1,
+      "supersedes": null
+    },
+    {
+      "id": "CONT-SIGIL",
+      "identity": "drifting-sigil",
+      "kind": "prop",
+      "description": "Open-ring sigil plate with transparent surround.",
+      "shotIds": ["SHOT-001"],
+      "referenceAssetId": null,
+      "attributes": {"shape": "open ring", "placement": "centred"},
+      "constraints": ["Must keep alpha outside the ring."],
+      "exclusions": ["Opaque backgrounds"],
+      "approval": "approved",
+      "revision": 1,
+      "supersedes": null
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "projectId": "synthetic-hybrid-continuity-demo",
+  "source": "user",
+  "approval": "approved",
+  "concept": "A drifting lantern crosses captured rain, its silhouette changed once on purpose.",
+  "narrativeMode": "abstract",
+  "moodProgression": ["close", "wider"],
+  "visualStyle": "hybrid live-action with transparent plate and canvas overlay",
+  "aspectRatio": "9:16",
+  "palette": ["#0A1220", "#FFD479", "#7BDFF2"],
+  "characters": [],
+  "setting": "a narrow rain-lit stairwell",
+  "continuityRules": [
+    "The lantern stays the single warm source in both shots.",
+    "The stairwell geometry stays readable behind the plate."
+  ],
+  "pacing": {
+    "preferredShotFrames": 48,
+    "minShotFrames": 20,
+    "maxShotFrames": 48,
+    "allowBeatCuts": true
+  },
+  "cameraLanguage": ["locked vertical frame"],
+  "transitions": ["hard cut on the approved anchor"],
+  "approvedReferences": [],
+  "excludedElements": ["faces", "text overlays", "generated photography"],
+  "productionConstraints": [
+    "Layers must be transparent PNGs with a real alpha channel.",
+    "Layer order is explicit and never inferred from filenames."
+  ],
+  "preferredRenderers": ["hybrid"],
+  "rendererDirectives": [
+    {
+      "id": "DIR-HYBRID-A",
+      "renderer": "hybrid",
+      "continuityIds": ["CONT-STYLE-01", "CONT-OBJ-LANTERN", "CONT-LIGHT-01"],
+      "media": {
+        "kind": "hybrid",
+        "backgroundSlot": "bg",
+        "sourceStartFrames": 0,
+        "fit": "cover",
+        "positionX": 0,
+        "positionY": 0,
+        "scale": 1,
+        "layers": [
+          {"slot": "lantern", "order": 0, "opacity": 1, "fit": "contain", "positionX": 0, "positionY": 0, "scale": 1, "visibleFromFrame": 0, "visibleToFrame": 48},
+          {"slot": "grid", "order": 1, "opacity": 0.6, "fit": "cover", "positionX": 0, "positionY": 0, "scale": 1, "visibleFromFrame": 12, "visibleToFrame": 48}
+        ],
+        "overlay": {"kind": "rain", "intensity": 0.35, "color": "#7BDFF2"}
+      }
+    },
+    {
+      "id": "DIR-HYBRID-B",
+      "renderer": "hybrid",
+      "continuityIds": ["CONT-STYLE-01", "CONT-OBJ-LANTERN-R2", "CONT-LIGHT-01"],
+      "media": {
+        "kind": "hybrid",
+        "backgroundSlot": "bg",
+        "sourceStartFrames": 24,
+        "fit": "cover",
+        "positionX": 0,
+        "positionY": 0,
+        "scale": 1,
+        "layers": [
+          {"slot": "lantern", "order": 0, "opacity": 1, "fit": "contain", "positionX": 0, "positionY": 6, "scale": 1, "visibleFromFrame": 0, "visibleToFrame": 48},
+          {"slot": "grid", "order": 1, "opacity": 0.6, "fit": "cover", "positionX": 0, "positionY": 0, "scale": 1, "visibleFromFrame": 0, "visibleToFrame": 36}
+        ],
+        "overlay": {"kind": "scan", "intensity": 0.25, "color": "#FFD479"}
+      }
+    }
+  ],
+  "requiredAssets": [],
+  "assumptions": [
+    "Both shots use the same local plates; the reviewer decides when an appearance change is intentional."
+  ]
+}

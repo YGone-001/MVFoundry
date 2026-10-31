@@ -33,6 +33,9 @@ It does not include any song, recording, lyrics, reference image, production sce
 - A style-independent creative brief, deterministic director plan, frame-accurate storyboard, asset requirements manifest and revisioned approval workflow.
 - A separate approved-storyboard compiler that validates a candidate project without overwriting `project.json`, and blocks compilation when required local assets are missing.
 - A real synthetic storyboard preview rendered through the existing Remotion/audio engine.
+- Media-aware shot planning: per-shot renderer directives that mix Canvas, project modules, Video and Hybrid shots, with planned media naming requirement slots rather than asset IDs.
+- Versioned local continuity records with declarative cross-shot validation, explicit supersession for intentional appearance changes, and actionable production tasks.
+- A local asset handoff workflow: `attach-asset` verifies path containment, hash, real container/codec, alpha, renderer fit and source duration; only `review-asset --decision approve` binds an asset, and a changed requirement makes the record stale instead of silently reusing it.
 - Half-open integer frame ranges, binary-search shot resolution, and sampling after selection.
 - Renderers:
   - `pixel-canvas` — configurable internal resolution, nearest-neighbour display, hold-based sampling.

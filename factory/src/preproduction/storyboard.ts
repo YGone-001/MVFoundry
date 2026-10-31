@@ -1,17 +1,25 @@
-import type {LoadedProject} from '../config/types';
+import type {LoadedProject, ShotMediaConfig, Shot} from '../config/types';
 import {PreproductionError} from '../errors';
 import {DEFAULT_SCENE_REGISTRY} from '../scenes/registry';
 import type {
   AnnotationDocument,
+  AssetIntakeDocument,
   AssetRequirement,
+  ContinuityDocument,
   DirectorPlan,
   LyricsDocument,
   PlanChapter,
   PlanShot,
+  PlannedShotMedia,
   Storyboard,
   StoryboardChapter,
   StoryboardShot,
 } from './types';
+import {
+  FATAL_CONTINUITY_CODES,
+  checkContinuityUsage,
+  validatePlannedMedia,
+} from './validate';
 
 const record = (value: unknown, field: string): Record<string, unknown> => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -61,6 +69,50 @@ const TIMING_SOURCES = [
   'lyric',
 ] as const;
 const APPROVALS = ['draft', 'proposed', 'approved', 'rejected'] as const;
+
+const isMediaRendererName = (renderer: string): boolean => renderer === 'video' || renderer === 'hybrid';
+
+/**
+ * A planned shot keeps its media intent so the compiler can bind an approved
+ * asset later. Shot-local visibility is re-checked here because the shot range
+ * is only known once the plan exists.
+ */
+const validatePlannedShotMedia = (
+  value: unknown,
+  renderer: string,
+  field: string,
+  shotLength: number,
+): PlannedShotMedia | null => {
+  if (!isMediaRendererName(renderer)) {
+    if (value !== undefined && value !== null) {
+      throw new PreproductionError(`${field}.media is only valid for video and hybrid shots`);
+    }
+    return null;
+  }
+  if (value === undefined || value === null) {
+    throw new PreproductionError(`${field}.media is required for the ${renderer} shot`);
+  }
+  const media = validatePlannedMedia(value, renderer, `${field}.media`);
+  if (media && media.kind === 'hybrid') {
+    for (const layer of media.layers) {
+      if (layer.visibleToFrame > shotLength) {
+        throw new PreproductionError(
+          `${field}.media layer ${layer.slot} is visible to frame ${layer.visibleToFrame}, beyond the shot length ${shotLength}`,
+        );
+      }
+    }
+  }
+  return media;
+};
+
+const validateContinuityIdList = (value: unknown, field: string): string[] => {
+  if (value === undefined || value === null) return [];
+  const items = array(value, field);
+  if (items.length > 32) throw new PreproductionError(`${field} must contain at most 32 entries`);
+  const ids = items.map((item, index) => text(item, `${field}[${index}]`));
+  if (new Set(ids).size !== ids.length) throw new PreproductionError(`${field} contains duplicate ids`);
+  return ids;
+};
 
 const assertCoverage = (
   chapters: Array<{startFrame: number; endFrame: number; shots: Array<{startFrame: number; endFrame: number; id: string}>}>,
@@ -161,6 +213,8 @@ export const validatePlan = (
         const cueId = optionalNullableText(shot.cueId, `${field}.cueId`);
         const rendererParams = record(shot.rendererParams, `${field}.rendererParams`);
         const timingSource = oneOf(shot.timingSource, TIMING_SOURCES, `${field}.timingSource`);
+        const continuityIds = validateContinuityIdList(shot.continuityIds, `${field}.continuityIds`);
+        const media = validatePlannedShotMedia(shot.media, renderer, field, endFrame - startFrame);
         if (timingSource === 'approved-beat-grid' && (cueId === null || !approvedBeatIds.has(cueId))) {
           throw new PreproductionError(
             `${field} claims approved beat-grid timing without referencing a beat id from the approved candidate`,
@@ -200,6 +254,8 @@ export const validatePlan = (
           sourceFrame,
           cueId,
           assetRequirementIds,
+          continuityIds,
+          media,
           characterReferences,
           continuityReferences,
           assumptions,
@@ -239,54 +295,166 @@ export const validatePlan = (
   return {...(plan as unknown as DirectorPlan), chapters};
 };
 
+export type Fulfillment = {
+  fulfilled: boolean;
+  reason: string;
+  assetId: string | null;
+  path: string | null;
+  sha256: string | null;
+};
+
+const unfulfilled = (reason: string): Fulfillment => ({
+  fulfilled: false,
+  reason,
+  assetId: null,
+  path: null,
+  sha256: null,
+});
+
+/**
+ * An approved local asset intake is the normal fulfilment route: the bytes were
+ * probed and reviewed explicitly, and the record still has to match the
+ * requirement fingerprint so a re-cut shot cannot inherit an old attachment.
+ * A manually edited requirement remains supported for compatibility.
+ */
 const requirementState = (
   requirement: AssetRequirement,
   project: LoadedProject,
-): {fulfilled: boolean; reason: string} => {
-  if (requirement.status === 'rejected') return {fulfilled: false, reason: 'rejected requirement'};
-  if (requirement.status !== 'approved') {
-    return {fulfilled: false, reason: `status is ${requirement.status}`};
+  intake: AssetIntakeDocument | null,
+): Fulfillment => {
+  const record = intake?.records.find((entry) => entry.requirementId === requirement.id) ?? null;
+  if (record) {
+    if (record.review === 'pending') return unfulfilled('asset intake is awaiting explicit review');
+    if (record.review === 'rejected') return unfulfilled('asset intake was rejected');
+    if (record.fingerprint !== requirement.fingerprint) {
+      return unfulfilled('stale fulfillment record: the requirement changed after attachment');
+    }
+    if (record.kind !== requirement.kind && !(record.kind === 'layer' && requirement.kind === 'image')) {
+      return unfulfilled(`intake asset kind ${record.kind} does not match requirement kind ${requirement.kind}`);
+    }
+    const asset = project.assets.find((entry) => entry.id === record.assetId);
+    if (asset && asset.approval !== 'approved') {
+      return unfulfilled(`project asset ${asset.id} is not approved`);
+    }
+    return {
+      fulfilled: true,
+      reason: 'approved local asset intake',
+      assetId: record.assetId,
+      path: record.path,
+      sha256: record.sha256,
+    };
   }
-  if (!requirement.fulfilledAssetId) return {fulfilled: false, reason: 'no fulfilled asset ID'};
+  if (requirement.status === 'rejected') return unfulfilled('rejected requirement');
+  if (requirement.status !== 'approved') return unfulfilled(`status is ${requirement.status}`);
+  if (!requirement.fulfilledAssetId) return unfulfilled('no fulfilled asset ID');
   if (requirement.kind === 'scene-module') {
     const module = project.sceneModules.find((entry) => entry.id === requirement.fulfilledAssetId);
     return module
-      ? {fulfilled: true, reason: 'declared scene module'}
-      : {fulfilled: false, reason: 'scene module is not declared'};
+      ? {...{reason: 'declared scene module', assetId: requirement.fulfilledAssetId, path: null, sha256: null}, fulfilled: true}
+      : unfulfilled('scene module is not declared');
   }
   const asset = project.assets.find((entry) => entry.id === requirement.fulfilledAssetId);
-  if (!asset) return {fulfilled: false, reason: 'fulfilled asset does not exist'};
-  if (asset.approval !== 'approved') return {fulfilled: false, reason: 'fulfilled asset is not approved'};
+  if (!asset) return unfulfilled('fulfilled asset does not exist');
+  if (asset.approval !== 'approved') return unfulfilled('fulfilled asset is not approved');
   if (
     requirement.kind !== 'existing-asset' &&
     asset.kind !== requirement.kind &&
     !(requirement.kind === 'image' && asset.kind === 'image')
   ) {
-    return {fulfilled: false, reason: `asset kind ${asset.kind} does not match ${requirement.kind}`};
+    return unfulfilled(`asset kind ${asset.kind} does not match ${requirement.kind}`);
   }
-  return {fulfilled: true, reason: 'approved asset'};
+  return {
+    fulfilled: true,
+    reason: 'approved asset',
+    assetId: asset.id,
+    path: asset.path,
+    sha256: asset.sha256,
+  };
 };
 
 const rendererReadyFor = (shot: PlanShot, project: LoadedProject): boolean => {
   const builtInCanvas = ['pixel-canvas', 'layered-canvas'].includes(shot.renderer);
   const moduleCanvas = project.sceneModules.some((module) => shot.renderer === `project:${module.id}`);
-  return builtInCanvas || moduleCanvas;
+  // A Video/Hybrid shot is renderer-ready only while it carries typed planned
+  // media; unfulfilled slots still block the storyboard through requirements.
+  const mediaReady = isMediaRendererName(shot.renderer) && shot.media !== null && shot.media !== undefined;
+  return builtInCanvas || moduleCanvas || mediaReady;
 };
 
-export const buildStoryboard = (input: {
+/**
+ * Every slot named by a shot's planned media must be covered by exactly one
+ * requirement, otherwise the compiler could bind an asset to the wrong layer.
+ */
+const assertMediaSlots = (shot: PlanShot, requirements: readonly AssetRequirement[]): void => {
+  if (!shot.media) return;
+  const slots = [
+    shot.media.backgroundSlot,
+    ...(shot.media.kind === 'hybrid' ? shot.media.layers.map((layer) => layer.slot) : []),
+  ];
+  for (const slot of slots) {
+    const matches = requirements.filter(
+      (requirement) =>
+        requirement.mediaSlot === slot && requirement.shotIds.includes(shot.id),
+    );
+    if (matches.length === 0) {
+      throw new PreproductionError(
+        `Shot ${shot.id} plans media slot ${slot} with no asset requirement; the storyboard cannot bind it`,
+      );
+    }
+    if (matches.length > 1) {
+      throw new PreproductionError(
+        `Shot ${shot.id} media slot ${slot} is claimed by ${matches.length} requirements`,
+      );
+    }
+  }
+};
+
+export type StoryboardBuildInput = {
   project: LoadedProject;
   plan: DirectorPlan;
   annotations: AnnotationDocument;
   lyrics: LyricsDocument | null;
+  intake?: AssetIntakeDocument | null;
+  continuity?: ContinuityDocument | null;
   revision: number;
   status?: 'draft' | 'approved';
-}): Storyboard => {
+};
+
+const applyContinuity = (
+  document: ContinuityDocument | null,
+  shots: Array<{id: string; continuityIds: string[]}>,
+): void => {
+  if (document === null) {
+    const declared = shots.filter((shot) => shot.continuityIds.length > 0);
+    if (declared.length > 0) {
+      throw new PreproductionError(
+        `Shots ${declared.map((shot) => shot.id).join(', ')} reference continuity but the project has no continuity.json`,
+      );
+    }
+    return;
+  }
+  const findings = checkContinuityUsage(document, shots);
+  const fatal = findings.filter((finding) => FATAL_CONTINUITY_CODES.includes(finding.code));
+  if (fatal.length > 0) {
+    throw new PreproductionError(
+      `Continuity validation failed: ${fatal.map((finding) => finding.message).join('; ')}`,
+    );
+  }
+};
+
+export const buildStoryboard = (input: StoryboardBuildInput): Storyboard => {
   const plan = validatePlan(input.plan, input.project, input.annotations, input.lyrics);
+  const intake = input.intake ?? null;
+  const allShots = plan.chapters.flatMap((chapter) => chapter.shots);
+  for (const shot of allShots) {
+    assertMediaSlots(shot, plan.assetRequirements);
+  }
+  applyContinuity(input.continuity ?? null, allShots);
   const requirementsById = new Map(plan.assetRequirements.map((requirement) => [requirement.id, requirement]));
   const fulfillment = new Map(
     plan.assetRequirements.map((requirement) => [
       requirement.id,
-      requirementState(requirement, input.project),
+      requirementState(requirement, input.project, intake),
     ]),
   );
   const chapters: StoryboardChapter[] = plan.chapters.map((chapter) => ({
@@ -349,6 +517,8 @@ export const validateStoryboard = (
   project: LoadedProject,
   annotations: AnnotationDocument,
   lyrics: LyricsDocument | null,
+  intake: AssetIntakeDocument | null = null,
+  continuity: ContinuityDocument | null = null,
 ): Storyboard => {
   const storyboard = record(raw, 'storyboard');
   if (storyboard.schemaVersion !== 1) throw new PreproductionError('storyboard.schemaVersion must be 1');
@@ -393,12 +563,16 @@ export const validateStoryboard = (
         for (const id of requirementRefs) {
           if (!requirementIds.has(id)) throw new PreproductionError(`${field} references unknown requirement ${id}`);
         }
+        const continuityIds = validateContinuityIdList(shot.continuityIds, `${field}.continuityIds`);
+        const media = validatePlannedShotMedia(shot.media, renderer, field, endFrame - startFrame);
         return {
           ...(shot as unknown as StoryboardShot),
           startFrame,
           endFrame,
           renderer,
           assetRequirementIds: requirementRefs,
+          continuityIds,
+          media,
           cueIds: shot.cueIds === undefined ? [] : array(shot.cueIds, `${field}.cueIds`).map((id, index) => text(id, `${field}.cueIds[${index}]`)),
           cutCueIds: shot.cutCueIds === undefined ? [] : array(shot.cutCueIds, `${field}.cutCueIds`).map((id, index) => text(id, `${field}.cutCueIds[${index}]`)),
           lyricLineIds: shot.lyricLineIds === undefined ? [] : array(shot.lyricLineIds, `${field}.lyricLineIds`).map((id, index) => text(id, `${field}.lyricLineIds[${index}]`)),
@@ -414,6 +588,11 @@ export const validateStoryboard = (
     };
   });
   assertCoverage(chapters, project.durationInFrames, 'storyboard');
+  const flatShots = chapters.flatMap((chapter) => chapter.shots);
+  for (const shot of flatShots) {
+    assertMediaSlots(shot, requirements);
+  }
+  applyContinuity(continuity, flatShots);
   const knownCues = new Set(project.config.cues.map((cue) => cue.id));
   const knownCuts = new Set(
     annotations.cutCues.filter((cue) => cue.approval === 'approved').map((cue) => cue.id),
@@ -434,9 +613,12 @@ export const validateStoryboard = (
       }
     }
   }
+  const fulfillmentById = new Map(
+    requirements.map((requirement) => [requirement.id, requirementState(requirement, project, intake)]),
+  );
   const computedMissing = [...new Set(
     requirements
-      .filter((requirement) => !requirementState(requirement, project).fulfilled)
+      .filter((requirement) => !fulfillmentById.get(requirement.id)?.fulfilled)
       .map((requirement) => requirement.id),
   )];
   const missing = storyboard.missingAssetRequirements === undefined
@@ -449,14 +631,38 @@ export const validateStoryboard = (
       throw new PreproductionError(`storyboard.missingAssetRequirements must include ${id}`);
     }
   }
-  if (storyboard.renderReady === true && (computedMissing.length > 0 || missing.length > 0)) {
+  if (storyboard.renderReady === true && computedMissing.length > 0) {
     throw new PreproductionError('storyboard cannot be renderReady while asset requirements are missing');
   }
+  // Readiness is recomputed from live fulfillment so an approved storyboard
+  // becomes render-ready once its assets are attached and reviewed, without
+  // rewriting the approved document.
+  const renderReady =
+    computedMissing.length === 0 &&
+    chapters.every((chapter) =>
+      chapter.shots.every((shot) => {
+        const shotMissing = shot.assetRequirementIds.filter(
+          (id) => !fulfillmentById.get(id)?.fulfilled,
+        );
+        return shotMissing.length === 0 && rendererReadyFor(shot, project);
+      }),
+    );
   return {
     ...(storyboard as unknown as Storyboard),
-    chapters,
+    chapters: chapters.map((chapter) => ({
+      ...chapter,
+      shots: chapter.shots.map((shot) => ({
+        ...shot,
+        missingAssetRequirements: shot.assetRequirementIds.filter(
+          (id) => !fulfillmentById.get(id)?.fulfilled,
+        ),
+        rendererReady:
+          shot.assetRequirementIds.every((id) => fulfillmentById.get(id)?.fulfilled) &&
+          rendererReadyFor(shot, project),
+      })),
+    })),
     assetRequirements: requirements,
-    missingAssetRequirements: missing,
-    renderReady: storyboard.renderReady === true && computedMissing.length === 0 && missing.length === 0,
+    missingAssetRequirements: computedMissing,
+    renderReady,
   };
 };

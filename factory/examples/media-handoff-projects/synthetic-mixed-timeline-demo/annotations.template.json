@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "projectId": "synthetic-mixed-timeline-demo",
+  "bpm": null,
+  "beatAnchors": [
+    {"id": "ANCHOR-01", "frame": 0, "timeSeconds": 0, "source": "user", "approval": "approved", "notes": "Editorial downbeat; frame zero is outside beat-grid detection and must come from an approved manual anchor."},
+    {"id": "ANCHOR-02", "frame": 30, "timeSeconds": 1, "source": "user", "approval": "approved"},
+    {"id": "ANCHOR-03", "frame": 60, "timeSeconds": 2, "source": "user", "approval": "approved"},
+    {"id": "ANCHOR-04", "frame": 90, "timeSeconds": 3, "source": "user", "approval": "approved"}
+  ],
+  "cutCues": [],
+  "sections": [
+    {"id": "SEC-01", "label": "ebb", "startFrame": 0, "endFrame": 60, "source": "user", "approval": "approved"},
+    {"id": "SEC-02", "label": "flood", "startFrame": 60, "endFrame": 120, "source": "user", "approval": "approved"}
+  ]
+}

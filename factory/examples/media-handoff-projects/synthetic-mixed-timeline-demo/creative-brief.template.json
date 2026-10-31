@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "projectId": "synthetic-mixed-timeline-demo",
+  "source": "user",
+  "approval": "approved",
+  "concept": "Tide light crosses a dark tiled harbour, alternating drawn geometry and captured motion.",
+  "narrativeMode": "abstract",
+  "moodProgression": ["expectant", "gathering", "spilling", "draining"],
+  "visualStyle": "pixel-art with live-action inserts",
+  "aspectRatio": "16:9",
+  "palette": ["#101820", "#7BDFF2", "#F2B705", "#E9E3D2"],
+  "characters": [],
+  "setting": "a tiled harbour mouth under a low moon",
+  "continuityRules": [
+    "Keep the horizon in the upper third.",
+    "Cyan reads as advancing water, amber as draining light.",
+    "The same harbour identity persists across drawn and captured shots."
+  ],
+  "pacing": {
+    "preferredShotFrames": 15,
+    "minShotFrames": 12,
+    "maxShotFrames": 30,
+    "allowBeatCuts": true
+  },
+  "cameraLanguage": ["locked wide on the harbour mouth", "slow lateral drift with the tide"],
+  "transitions": ["hard cut on the approved beat"],
+  "approvedReferences": [],
+  "excludedElements": ["literal humans", "text overlays", "generated photography"],
+  "productionConstraints": [
+    "Only locally supplied, hash-verified assets may bind.",
+    "A shot stays blocked until its media requirement is approved.",
+    "No provider generation is authorized in this phase."
+  ],
+  "preferredRenderers": ["pixel-canvas", "video"],
+  "rendererDirectives": [
+    {
+      "id": "DIR-CANVAS",
+      "renderer": "pixel-canvas",
+      "continuityIds": ["CONT-STYLE-01"],
+      "media": null
+    },
+    {
+      "id": "DIR-VIDEO",
+      "renderer": "video",
+      "continuityIds": ["CONT-STYLE-01", "CONT-LOC-HARBOUR"],
+      "media": {
+        "kind": "video",
+        "backgroundSlot": "bg",
+        "sourceStartFrames": 30,
+        "fit": "cover",
+        "positionX": 0,
+        "positionY": 0,
+        "scale": 1
+      }
+    }
+  ],
+  "requiredAssets": [],
+  "assumptions": [
+    "Directives alternate across generated shots, so drawn and captured shots interleave.",
+    "The reviewer, not the analyzer, chooses timing and renderer family."
+  ]
+}

@@ -7,11 +7,13 @@ import type {
   AssetRequirement,
   BeatGridReport,
   CreativeBrief,
+  CreativeBriefRendererDirective,
   DirectorPlan,
   LyricsDocument,
   PlanChapter,
   PlanShot,
   PlanTimingSource,
+  PlannedShotMedia,
   SectionAnnotation,
 } from './types';
 import {DIRECTOR_ALGORITHM_VERSION} from './types';
@@ -26,6 +28,25 @@ export type DirectorPlanInput = {
   revision: number;
   status?: 'proposed' | 'draft';
 };
+
+export const requirementFingerprint = (requirement: {
+  shotIds: string[];
+  renderer: string;
+  kind: string;
+  mediaSlot: string | null;
+  durationFrames: number | null;
+  aspectRatio: string;
+  description: string;
+}): string =>
+  [
+    [...requirement.shotIds].sort().join(','),
+    requirement.renderer,
+    requirement.kind,
+    requirement.mediaSlot ?? '-',
+    requirement.durationFrames ?? '-',
+    requirement.aspectRatio,
+    requirement.description,
+  ].join('|');
 
 type Timing = {
   manual: boolean;
@@ -125,13 +146,41 @@ const resolveTiming = (input: DirectorPlanInput): Timing => {
   );
 };
 
+const cloneMedia = (media: PlannedShotMedia): PlannedShotMedia =>
+  media.kind === 'video'
+    ? {...media}
+    : {...media, overlay: {...media.overlay}, layers: media.layers.map((layer) => ({...layer}))};
+
+const isMediaRendererKind = (renderer: string): boolean => renderer === 'video' || renderer === 'hybrid';
+
+const rendererAvailable = (input: DirectorPlanInput, renderer: string): boolean =>
+  DEFAULT_SCENE_REGISTRY.kinds().includes(renderer) ||
+  input.project.sceneModules.some((module) => renderer === `project:${module.id}`);
+
+/**
+ * Renderer selection is per shot, not per project. A brief with directives may
+ * mix Canvas, project-module, Video and Hybrid shots in one storyboard; a shot
+ * whose media requirement is unfulfilled stays blocked instead of being
+ * silently downgraded to Canvas.
+ */
+const directiveFor = (
+  input: DirectorPlanInput,
+  index: number,
+): CreativeBriefRendererDirective | null => {
+  const directives = input.brief.rendererDirectives;
+  if (directives.length === 0) return null;
+  const directive = directives[index % directives.length];
+  if (!rendererAvailable(input, directive.renderer)) {
+    throw new PreproductionError(
+      `Renderer directive ${directive.id} references unavailable renderer ${directive.renderer}`,
+    );
+  }
+  return directive;
+};
+
 const pickRenderer = (input: DirectorPlanInput): string => {
   for (const renderer of input.brief.preferredRenderers) {
-    const registered = DEFAULT_SCENE_REGISTRY.kinds().includes(renderer);
-    const moduleRenderer = input.project.sceneModules.some(
-      (module) => renderer === `project:${module.id}`,
-    );
-    if (registered || moduleRenderer) return renderer;
+    if (rendererAvailable(input, renderer)) return renderer;
   }
   throw new PreproductionError('No preferred renderer is available in the project registry');
 };
@@ -224,6 +273,8 @@ const makeShotsForSection = (
     const startFrame = boundaries[index];
     const endFrame = boundaries[index + 1];
     const shotIndex = startIndex + index;
+    const directive = directiveFor(input, shotIndex);
+    const shotRenderer = directive?.renderer ?? renderer;
     const lyric = input.lyrics?.lines.find(
       (line) => line.frame >= startFrame && line.frame < endFrame,
     );
@@ -259,8 +310,8 @@ const makeShotsForSection = (
       endFrame,
       purpose,
       visualDescription,
-      renderer,
-      rendererParams: rendererParams(input, renderer, shotIndex),
+      renderer: shotRenderer,
+      rendererParams: rendererParams(input, shotRenderer, shotIndex),
       camera,
       movement,
       colorAndLighting: `${mood}; ${pick(input.brief.moodProgression, shotIndex + 1, 'controlled contrast')}`,
@@ -291,6 +342,8 @@ const makeShotsForSection = (
         ...input.brief.characters,
         ...input.brief.continuityRules.slice(0, 2),
       ].filter((value): value is string => Boolean(value)),
+      continuityIds: directive ? [...directive.continuityIds] : [],
+      media: directive?.media ? cloneMedia(directive.media) : null,
       reviewStatus: 'draft',
       assumptions: [
         ...input.brief.assumptions,
@@ -332,29 +385,106 @@ export const generateDirectorPlan = (input: DirectorPlanInput): DirectorPlan => 
     });
   }
   const allShots = chapters.flatMap((chapter) => chapter.shots);
-  const requirements: AssetRequirement[] = input.brief.requiredAssets.map((need, index) => {
-    const id = `REQ-${String(index + 1).padStart(3, '0')}`;
-    const targetShot = allShots[index % allShots.length];
-    targetShot.assetRequirementIds.push(id);
-    return {
-      id,
-      shotIds: [targetShot.id],
+  const requirements: AssetRequirement[] = [];
+  const addRequirement = (
+    shot: PlanShot,
+    draft: Omit<AssetRequirement, 'id' | 'shotIds'>,
+  ): AssetRequirement => {
+    const requirement: AssetRequirement = {
+      ...draft,
+      id: `REQ-${String(requirements.length + 1).padStart(3, '0')}`,
+      shotIds: [shot.id],
+    };
+    requirements.push(requirement);
+    shot.assetRequirementIds.push(requirement.id);
+    return requirement;
+  };
+  const baseProvenance =
+    'User-supplied or approved local asset; provenance and rights must be recorded at attachment. No provider generation is authorized in this phase.';
+  for (const shot of allShots) {
+    const media = shot.media;
+    if (!media) continue;
+    const shotLength = shot.endFrame - shot.startFrame;
+    if (media.sourceStartFrames + shotLength > Number.MAX_SAFE_INTEGER) {
+      throw new PreproductionError(`Shot ${shot.id} requests an out-of-range video in-point`);
+    }
+    const background = addRequirement(shot, {
+      kind: 'video',
+      description: `Video background for ${shot.id}: ${shot.purpose}`,
+      visualStyle: shot.visualDescription,
+      aspectRatio: input.brief.aspectRatio,
+      durationFrames: media.sourceStartFrames + shotLength,
+      alphaRequired: false,
+      continuityReferences: [...shot.continuityIds],
+      provenanceRequirements: baseProvenance,
+      renderer: shot.renderer,
+      status: 'needed',
+      approval: 'draft',
+      fulfilledAssetId: null,
+      path: null,
+      sha256: null,
+      mediaSlot: media.backgroundSlot,
+      fingerprint: '',
+    });
+    background.fingerprint = requirementFingerprint(background);
+    if (media.kind !== 'hybrid') continue;
+    for (const layer of media.layers) {
+      if (layer.visibleFromFrame >= layer.visibleToFrame) {
+        throw new PreproductionError(
+          `Shot ${shot.id} layer slot ${layer.slot} has an empty shot-local visibility range`,
+        );
+      }
+      if (layer.visibleToFrame > shotLength) {
+        throw new PreproductionError(
+          `Shot ${shot.id} layer slot ${layer.slot} is visible to frame ${layer.visibleToFrame}, beyond the shot length ${shotLength}`,
+        );
+      }
+      const layerRequirement = addRequirement(shot, {
+        kind: 'layer',
+        description: `Transparent PNG layer ${layer.slot} for ${shot.id} at order ${layer.order}`,
+        visualStyle: shot.visualDescription,
+        aspectRatio: input.brief.aspectRatio,
+        durationFrames: layer.visibleToFrame - layer.visibleFromFrame,
+        alphaRequired: true,
+        continuityReferences: [...shot.continuityIds],
+        provenanceRequirements: baseProvenance,
+        renderer: shot.renderer,
+        status: 'needed',
+        approval: 'draft',
+        fulfilledAssetId: null,
+        path: null,
+        sha256: null,
+        mediaSlot: layer.slot,
+        fingerprint: '',
+      });
+      layerRequirement.fingerprint = requirementFingerprint(layerRequirement);
+    }
+  }
+  for (const need of input.brief.requiredAssets) {
+    const targetShot = allShots[requirements.length % allShots.length];
+    const requirement = addRequirement(targetShot, {
       kind: need.kind,
       description: need.description,
       visualStyle: need.visualStyle ?? input.brief.visualStyle,
       aspectRatio: input.brief.aspectRatio,
       durationFrames: need.durationFrames ?? null,
       alphaRequired: need.alphaRequired ?? false,
-      continuityReferences: need.continuityReferences ?? [],
-      provenanceRequirements: 'User-authored or approved local asset; no provider generation is authorized in this phase.',
+      continuityReferences: [
+        ...(need.continuityReferences ?? []),
+        ...targetShot.continuityIds,
+      ],
+      provenanceRequirements: baseProvenance,
       renderer: targetShot.renderer,
       status: 'needed',
       approval: 'draft',
       fulfilledAssetId: null,
       path: null,
       sha256: null,
-    };
-  });
+      mediaSlot: null,
+      fingerprint: '',
+    });
+    requirement.fingerprint = requirementFingerprint(requirement);
+  }
   const timingNotes = [
     timing.manual
       ? 'Approved manual BPM, beat anchors or cut cues take precedence over any beat grid.'
@@ -372,6 +502,11 @@ export const generateDirectorPlan = (input: DirectorPlanInput): DirectorPlan => 
         }`
       : `Beat timing source: ${timing.beatSource}.`,
     `Section count: ${sections.length}; shots generated: ${allShots.length}.`,
+    input.brief.rendererDirectives.length > 0
+      ? `Renderer directives are applied per shot: ${allShots
+          .map((shot) => `${shot.id}=${shot.renderer}${shot.media ? ` (${shot.media.kind} slots pending)` : ''}`)
+          .join(', ')}.`
+      : 'All shots use the single preferred renderer from the brief.',
     ...(input.brief.pacing.allowBeatCuts
       ? ['Beat cuts are optional guidance and are not applied to every detected transient.']
       : ['Beat cuts are disabled by the creative pacing policy.']),

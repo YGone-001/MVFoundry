@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "projectId": "synthetic-hybrid-continuity-demo",
+  "revision": 1,
+  "entries": [
+    {
+      "id": "CONT-STYLE-01",
+      "identity": "rain-stairwell-look",
+      "kind": "style",
+      "description": "Cool rain-lit stairwell with one warm practical light.",
+      "shotIds": ["SHOT-001", "SHOT-002"],
+      "referenceAssetId": null,
+      "attributes": {"palette": "#0A1220 #FFD479 #7BDFF2", "weather": "rain"},
+      "constraints": ["One warm source only."],
+      "exclusions": ["Sunlight"],
+      "approval": "approved",
+      "revision": 1,
+      "supersedes": null
+    },
+    {
+      "id": "CONT-LIGHT-01",
+      "identity": "practical-lighting",
+      "kind": "lighting",
+      "description": "Single practical lantern key, hard falloff, no fill.",
+      "shotIds": ["SHOT-001", "SHOT-002"],
+      "referenceAssetId": null,
+      "attributes": {"key": "lantern", "fill": "none"},
+      "constraints": [],
+      "exclusions": [],
+      "approval": "approved",
+      "revision": 1,
+      "supersedes": null
+    },
+    {
+      "id": "CONT-OBJ-LANTERN",
+      "identity": "drifting-lantern",
+      "kind": "prop",
+      "description": "Paper lantern, unlit rim, centred high.",
+      "shotIds": ["SHOT-001"],
+      "referenceAssetId": null,
+      "attributes": {"shape": "round", "offset": "centred"},
+      "constraints": ["Rim stays visible."],
+      "exclusions": [],
+      "approval": "approved",
+      "revision": 1,
+      "supersedes": null
+    },
+    {
+      "id": "CONT-OBJ-LANTERN-R2",
+      "identity": "drifting-lantern",
+      "kind": "prop",
+      "description": "Same lantern, lowered and partly cropped at the frame edge.",
+      "shotIds": ["SHOT-002"],
+      "referenceAssetId": null,
+      "attributes": {"shape": "round", "offset": "lower-right"},
+      "constraints": ["Intentional appearance change, approved by the reviewer."],
+      "exclusions": [],
+      "approval": "approved",
+      "revision": 2,
+      "supersedes": "CONT-OBJ-LANTERN"
+    }
+  ]
+}

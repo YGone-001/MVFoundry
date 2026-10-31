@@ -1,4 +1,9 @@
-import type {SceneParams} from '../config/types';
+import type {
+  HybridOverlayKind,
+  MediaFit,
+  ProjectAssetKind,
+  SceneParams,
+} from '../config/types';
 
 export const PREPRODUCTION_SCHEMA_VERSION = 1;
 export const BEAT_GRID_ALGORITHM_VERSION = 'beat-grid-v1';
@@ -199,6 +204,50 @@ export type CreativeBriefAssetNeed = {
   continuityReferences?: string[];
 };
 
+/**
+ * Planned media is intent, not configuration. It names the requirement slots
+ * that must be fulfilled before a real asset ID exists, and reuses the accepted
+ * P1-C media vocabulary so the compiler never needs a second media schema. The
+ * shape is flat and identical in the brief, the plan and the storyboard.
+ */
+export type PlannedMediaBase = {
+  backgroundSlot: string;
+  sourceStartFrames: number;
+  fit: MediaFit;
+  positionX: number;
+  positionY: number;
+  scale: number;
+};
+
+export type PlannedHybridLayer = {
+  slot: string;
+  order: number;
+  opacity: number;
+  fit: MediaFit;
+  positionX: number;
+  positionY: number;
+  scale: number;
+  visibleFromFrame: number;
+  visibleToFrame: number;
+};
+
+export type PlannedHybridOverlay = {
+  kind: HybridOverlayKind;
+  intensity: number;
+  color: string | null;
+};
+
+export type PlannedShotMedia =
+  | (PlannedMediaBase & {kind: 'video'})
+  | (PlannedMediaBase & {kind: 'hybrid'; layers: PlannedHybridLayer[]; overlay: PlannedHybridOverlay});
+
+export type CreativeBriefRendererDirective = {
+  id: string;
+  renderer: string;
+  continuityIds: string[];
+  media: PlannedShotMedia | null;
+};
+
 export type CreativeBrief = {
   schemaVersion: 1;
   projectId: string;
@@ -220,6 +269,7 @@ export type CreativeBrief = {
   excludedElements: string[];
   productionConstraints: string[];
   preferredRenderers: string[];
+  rendererDirectives: CreativeBriefRendererDirective[];
   requiredAssets: CreativeBriefAssetNeed[];
   assumptions: string[];
 };
@@ -255,6 +305,8 @@ export type AssetRequirement = {
   fulfilledAssetId: string | null;
   path: string | null;
   sha256: string | null;
+  mediaSlot: string | null;
+  fingerprint: string;
 };
 
 export type PlanTimingSource =
@@ -286,6 +338,8 @@ export type PlanShot = {
   cueId: string | null;
   assetRequirementIds: string[];
   continuityReferences: string[];
+  continuityIds: string[];
+  media: PlannedShotMedia | null;
   reviewStatus: ApprovalStatus;
   assumptions: string[];
 };
@@ -400,4 +454,135 @@ export type AssetRequirementsManifest = {
   requirements: AssetRequirement[];
   missingAssetRequirements: string[];
   notes: string[];
+};
+
+export const CONTINUITY_SCHEMA_VERSION = 1;
+export const PRODUCTION_TASK_SCHEMA_VERSION = 1;
+export const ASSET_INTAKE_SCHEMA_VERSION = 1;
+
+export type ContinuityKind =
+  | 'character'
+  | 'location'
+  | 'appearance'
+  | 'prop'
+  | 'style'
+  | 'palette'
+  | 'lighting'
+  | 'camera';
+
+export type ContinuityEntry = {
+  id: string;
+  identity: string;
+  kind: ContinuityKind;
+  description: string;
+  shotIds: string[];
+  referenceAssetId: string | null;
+  attributes: Record<string, string>;
+  constraints: string[];
+  exclusions: string[];
+  approval: ApprovalStatus;
+  revision: number;
+  supersedes: string | null;
+};
+
+export type ContinuityDocument = {
+  schemaVersion: typeof CONTINUITY_SCHEMA_VERSION;
+  projectId: string;
+  revision: number;
+  entries: ContinuityEntry[];
+};
+
+export type ContinuityFinding = {
+  code:
+    | 'unknown-reference'
+    | 'unapproved-reference'
+    | 'contradictory-attributes'
+    | 'undeclared-appearance-change'
+    | 'missing-reference-asset'
+    | 'shot-declaration-mismatch'
+    | 'unknown-asset';
+  continuityId: string;
+  shotIds: string[];
+  message: string;
+};
+
+export type ProductionTaskStatus =
+  | 'needed'
+  | 'in-production'
+  | 'delivered'
+  | 'under-review'
+  | 'approved'
+  | 'rejected';
+
+export type ProductionTask = {
+  id: string;
+  requirementId: string;
+  shotIds: string[];
+  renderer: string;
+  assetKind: AssetRequirementKind;
+  mediaSlot: string | null;
+  brief: string;
+  visualStyle: string;
+  targetWidth: number | null;
+  targetHeight: number | null;
+  aspectRatio: string;
+  targetDurationFrames: number | null;
+  alphaRequired: boolean;
+  continuityIds: string[];
+  approvedReferenceIds: string[];
+  provenanceRequirements: string;
+  acceptanceCriteria: string[];
+  productionStatus: ProductionTaskStatus;
+  reviewStatus: ApprovalStatus;
+  fulfilledAssetId: string | null;
+  path: string | null;
+  sha256: string | null;
+  revision: number;
+};
+
+export type ProductionTaskManifest = {
+  schemaVersion: typeof PRODUCTION_TASK_SCHEMA_VERSION;
+  projectId: string;
+  storyboardRevision: number;
+  tasks: ProductionTask[];
+  unapprovedContinuityReferences: string[];
+  notes: string[];
+};
+
+export type AssetIntakeReview = 'pending' | 'in-review' | 'approved' | 'rejected';
+
+export type AssetIntakeRecord = {
+  requirementId: string;
+  assetId: string;
+  kind: ProjectAssetKind;
+  path: string;
+  sha256: string;
+  fileSizeBytes: number;
+  fingerprint: string;
+  provenance: string;
+  rights: string;
+  review: AssetIntakeReview;
+  reviewNotes: string | null;
+  recordedAtStoryboardRevision: number;
+  technical: {
+    probed: 'video' | 'layer' | 'image' | 'audio' | 'unprobed';
+    width: number | null;
+    height: number | null;
+    durationSeconds: number | null;
+    fps: number | null;
+    hasAlpha: boolean | null;
+    codec: string | null;
+  };
+};
+
+export type AssetIntakeDocument = {
+  schemaVersion: typeof ASSET_INTAKE_SCHEMA_VERSION;
+  projectId: string;
+  records: AssetIntakeRecord[];
+};
+
+export type StaleFulfillment = {
+  requirementId: string;
+  assetId: string;
+  reason: string;
 };

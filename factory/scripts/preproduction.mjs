@@ -3,7 +3,7 @@
 // Requires: npm run build and MV_WORKSPACE_ROOT or --workspace.
 
 import {createHash} from 'node:crypto';
-import {existsSync} from 'node:fs';
+import {existsSync, realpathSync, statSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
 import {createRequire} from 'node:module';
 import path from 'node:path';
@@ -32,6 +32,11 @@ if (!command || command === '--help' || command === 'help') {
   approve-plan --project <id> [--revision N]
   storyboard --project <id> [--new-revision]
   approve-storyboard --project <id> [--revision N]
+  continuity --project <id>
+  tasks --project <id>
+  attach-asset --project <id> --requirement <REQ> --asset-id <ID> --path <project-relative> \
+    --provenance "<source>" --rights "<licence>"
+  review-asset --project <id> --requirement <REQ> --decision <start-review|approve|reject> --notes "<review>"
   report-assets --project <id>
   compile --project <id>
   render-preview --project <id> [--frames A-B]
@@ -39,7 +44,9 @@ if (!command || command === '--help' || command === 'help') {
 All commands accept --workspace <external-root> or MV_WORKSPACE_ROOT.
 Preproduction files live under <project>/preproduction/.
 A beat grid is estimated evidence; only approve-beats can turn one measured
-interpretation into timing the director planner is allowed to use.`);
+interpretation into timing the director planner is allowed to use.
+Planned media is intent; only attach-asset plus review-asset --decision approve
+can bind an approved local file to a requirement so a real asset ID is emitted.`);
   process.exit(command ? 0 : 2);
 }
 if (!projectId) {
@@ -56,15 +63,24 @@ const {decodeAudioToNormalizedPcm} = require('../dist/src/media/audioDecode.js')
 const {stereoToMono} = require('../dist/src/audio/analysis.js');
 const {DEFAULT_SCENE_REGISTRY} = require('../dist/src/scenes/registry.js');
 const {createProjectWriteBoundary} = require('../dist/src/workspace/writeBoundary.js');
+const {resolveProjectRelativePath, isInside} = require('../dist/src/workspace/guard.js');
+const {sha256File} = require('../dist/src/media/hash.js');
+const {probeVideo} = require('../dist/src/media/videoProbe.js');
+const {probeLayerPng} = require('../dist/src/media/pngProbe.js');
 const {analyzeBeatGrid, buildApprovedBeatGrid} = require('../dist/src/preproduction/beatGrid.js');
 const {
   validateAnnotations,
   validateApprovedBeatGrid,
+  validateAssetIntake,
   validateBeatGridReport,
+  validateContinuity,
   validateCreativeBrief,
   validateJsonLyrics,
   parseLrcLyrics,
+  checkContinuityUsage,
+  FATAL_CONTINUITY_CODES,
 } = require('../dist/src/preproduction/validate.js');
+const {buildProductionTasks} = require('../dist/src/preproduction/production.js');
 const {
   PREPRODUCTION_PATHS,
   readOptionalProjectJson,
@@ -198,6 +214,27 @@ const loadInputs = ({requireApproved = false} = {}) => {
   if (evidence.approvalError) {
     fail(`Approved beat grid is not valid against the current beat grid: ${evidence.approvalError}`);
   }
+  const continuityRaw = readOptionalProjectJson(
+    project.projectDir,
+    PREPRODUCTION_PATHS.continuity,
+    {engineRoot: repoRoot},
+  );
+  const continuity = continuityRaw === null
+    ? null
+    : validateContinuity(continuityRaw, {...context, sections: annotations.sections});
+  // Requirements are owned by the active plan and refined by the storyboard, so
+  // intake records are validated against whichever exists.
+  const planRaw = readOptionalProjectJson(project.projectDir, PREPRODUCTION_PATHS.plan, {engineRoot: repoRoot});
+  const storyboardRaw = readOptionalProjectJson(
+    project.projectDir,
+    PREPRODUCTION_PATHS.storyboard,
+    {engineRoot: repoRoot},
+  );
+  const requirements = storyboardRaw?.assetRequirements ?? planRaw?.assetRequirements ?? [];
+  const intakeRaw = readOptionalProjectJson(project.projectDir, PREPRODUCTION_PATHS.assetIntake, {engineRoot: repoRoot});
+  const intake = intakeRaw === null
+    ? null
+    : validateAssetIntake(intakeRaw, {projectId, requirements});
   return {
     project,
     boundary,
@@ -207,6 +244,11 @@ const loadInputs = ({requireApproved = false} = {}) => {
     beatGrid: evidence.beatGrid,
     approvedBeatGrid: evidence.approvedBeatGrid,
     approvalError: evidence.approvalError,
+    continuity,
+    intake,
+    planRaw,
+    storyboardRaw,
+    requirements,
     context,
   };
 };
@@ -339,7 +381,7 @@ const run = () => {
   }
 
   if (command === 'validate') {
-    const {annotations, brief, lyrics, beatGrid, approvedBeatGrid} = loadInputs();
+    const {annotations, brief, lyrics, beatGrid, approvedBeatGrid, continuity, intake, requirements} = loadInputs();
     console.log(JSON.stringify({
       projectId,
       annotations: {
@@ -348,11 +390,31 @@ const run = () => {
         cutCues: annotations.cutCues.length,
         sections: annotations.sections.length,
       },
-      brief: {approval: brief.approval, concept: brief.concept, renderers: brief.preferredRenderers},
+      brief: {
+        approval: brief.approval,
+        concept: brief.concept,
+        renderers: brief.preferredRenderers,
+        rendererDirectives: brief.rendererDirectives.map((directive) => ({
+          id: directive.id,
+          renderer: directive.renderer,
+          media: directive.media ? directive.media.kind : null,
+          continuityIds: directive.continuityIds,
+        })),
+      },
       lyrics: lyrics ? {language: lyrics.language, lines: lyrics.lines.length, approval: lyrics.approval} : null,
       beatGrid: beatGrid ? {quality: beatGrid.estimatedTempo?.quality ?? 'insufficient', bpm: beatGrid.estimatedTempo?.bpm ?? null, approval: beatGrid.approval} : null,
       approvedBeatGrid: approvedBeatGrid
         ? {interpretation: approvedBeatGrid.selected.interpretation, bpm: approvedBeatGrid.selected.bpm, beats: approvedBeatGrid.selected.beatFrames.length, approvalRevision: approvedBeatGrid.selected.approvalRevision}
+        : null,
+      continuity: continuity
+        ? {revision: continuity.revision, entries: continuity.entries.length, approved: continuity.entries.filter((entry) => entry.approval === 'approved').length}
+        : null,
+      requirements: requirements.length,
+      assetIntake: intake
+        ? {records: intake.records.length, byReview: intake.records.reduce((summary, record) => {
+            summary[record.review] = (summary[record.review] ?? 0) + 1;
+            return summary;
+          }, {})}
         : null,
     }, null, 2));
     return 0;
@@ -415,7 +477,15 @@ const run = () => {
   }
 
   if (command === 'storyboard') {
-    const {project, boundary, annotations, lyrics, beatGrid} = loadInputs({requireApproved: true});
+    const {
+      project,
+      boundary,
+      annotations,
+      lyrics,
+      beatGrid,
+      continuity,
+      intake,
+    } = loadInputs({requireApproved: true});
     const plan = readOptionalProjectJson(project.projectDir, PREPRODUCTION_PATHS.plan, {engineRoot: repoRoot});
     if (!plan) fail('No director plan found; run plan and approve-plan first');
     if (plan.status !== 'approved') fail('The active director plan must be approved before storyboard generation');
@@ -430,6 +500,8 @@ const run = () => {
       plan: validatedPlan,
       annotations,
       lyrics,
+      intake,
+      continuity,
       revision,
       status: 'draft',
     });
@@ -457,9 +529,9 @@ const run = () => {
   }
 
   if (command === 'approve-storyboard') {
-    const {project, boundary, annotations, lyrics} = loadInputs();
+    const {project, boundary, annotations, lyrics, intake, continuity} = loadInputs();
     const source = activeOrRevision('storyboard', PREPRODUCTION_PATHS.storyboard);
-    const storyboard = validateStoryboard(source.raw, project, annotations, lyrics);
+    const storyboard = validateStoryboard(source.raw, project, annotations, lyrics, intake, continuity);
     if (storyboard.status === 'rejected') fail('A rejected storyboard cannot be approved without a new revision');
     const approved = {...storyboard, status: 'approved'};
     writeRevisionAndActive(boundary, 'storyboard', approved, PREPRODUCTION_PATHS.storyboard, true);
@@ -475,10 +547,10 @@ const run = () => {
   }
 
   if (command === 'report-assets') {
-    const {project, boundary, annotations, lyrics} = loadInputs();
+    const {project, boundary, annotations, lyrics, intake, continuity} = loadInputs();
     const storyboardRaw = readOptionalProjectJson(project.projectDir, PREPRODUCTION_PATHS.storyboard, {engineRoot: repoRoot});
     if (!storyboardRaw) fail('No storyboard found; run storyboard first');
-    const storyboard = validateStoryboard(storyboardRaw, project, annotations, lyrics);
+    const storyboard = validateStoryboard(storyboardRaw, project, annotations, lyrics, intake, continuity);
     const manifest = {
       schemaVersion: 1,
       projectId,
@@ -496,12 +568,232 @@ const run = () => {
     return storyboard.renderReady ? 0 : 2;
   }
 
+  if (command === 'tasks') {
+    const {project, boundary, annotations, lyrics, intake, continuity} = loadInputs();
+    const storyboardRaw = readOptionalProjectJson(project.projectDir, PREPRODUCTION_PATHS.storyboard, {engineRoot: repoRoot});
+    if (!storyboardRaw) fail('No storyboard found; run storyboard first');
+    const storyboard = validateStoryboard(storyboardRaw, project, annotations, lyrics, intake, continuity);
+    const manifest = buildProductionTasks({project, storyboard, continuity, intake});
+    writeProjectJson(boundary, PREPRODUCTION_PATHS.productionTasks, manifest);
+    const unresolved = manifest.tasks.filter((task) => task.productionStatus !== 'approved');
+    console.log(JSON.stringify({
+      projectId,
+      output: PREPRODUCTION_PATHS.productionTasks,
+      storyboardRevision: manifest.storyboardRevision,
+      tasks: manifest.tasks.length,
+      unresolved: unresolved.map((task) => `${task.id}:${task.requirementId}:${task.productionStatus}`),
+      byStatus: manifest.tasks.reduce((summary, task) => {
+        summary[task.productionStatus] = (summary[task.productionStatus] ?? 0) + 1;
+        return summary;
+      }, {}),
+      unapprovedContinuityReferences: manifest.unapprovedContinuityReferences,
+      notes: manifest.notes,
+    }, null, 2));
+    return unresolved.length === 0 ? 0 : 2;
+  }
+
+  if (command === 'continuity') {
+    const {project, continuity} = loadInputs();
+    const shots = (readOptionalProjectJson(project.projectDir, PREPRODUCTION_PATHS.storyboard, {engineRoot: repoRoot})
+      ?? readOptionalProjectJson(project.projectDir, PREPRODUCTION_PATHS.plan, {engineRoot: repoRoot})
+      ?? {chapters: []}).chapters.flatMap((chapter) => chapter.shots ?? []);
+    if (!continuity) {
+      console.log(JSON.stringify({
+        projectId,
+        continuity: null,
+        note: `No ${PREPRODUCTION_PATHS.continuity}; write it to record characters, locations, props, palette, lighting and camera identity`,
+      }, null, 2));
+      return 0;
+    }
+    const findings = checkContinuityUsage(continuity, shots);
+    console.log(JSON.stringify({
+      projectId,
+      path: PREPRODUCTION_PATHS.continuity,
+      revision: continuity.revision,
+      entries: continuity.entries.map((entry) => ({
+        id: entry.id,
+        kind: entry.kind,
+        identity: entry.identity,
+        approval: entry.approval,
+        shotIds: entry.shotIds,
+        referenceAssetId: entry.referenceAssetId,
+      })),
+      findings,
+      fatal: findings.filter((finding) => FATAL_CONTINUITY_CODES.includes(finding.code)),
+    }, null, 2));
+    return findings.some((finding) => FATAL_CONTINUITY_CODES.includes(finding.code)) ? 2 : 0;
+  }
+
+  if (command === 'attach-asset') {
+    const {project, boundary, requirements, intake, continuity, storyboardRaw, planRaw} = loadInputs();
+    const requirementId = arg('requirement');
+    if (!requirementId) fail('--requirement is required');
+    const requirement = requirements.find((entry) => entry.id === requirementId);
+    if (!requirement) fail(`Unknown requirement ${requirementId}`);
+    const assetId = arg('asset-id');
+    if (!assetId) fail('--asset-id is required');
+    const relativePath = arg('path');
+    if (!relativePath) fail('--path is required and must be project-relative');
+    const provenance = arg('provenance');
+    if (!provenance) fail('--provenance is required: record where this asset came from');
+    const rights = arg('rights');
+    if (!rights) fail('--rights is required: record the usage assertion for this asset');
+    if (['video', 'layer'].includes(requirement.kind) && !['video', 'hybrid'].includes(requirement.renderer)) {
+      fail(`Requirement ${requirementId} is a ${requirement.kind} but targets renderer ${requirement.renderer}, which cannot bind it`);
+    }
+    if (requirement.kind === 'image' && requirement.renderer !== 'layered-canvas') {
+      fail(`Requirement ${requirementId} is an image and can only bind to layered-canvas`);
+    }
+    const absolute = resolveProjectRelativePath(project.projectDir, relativePath, {engineRoot: repoRoot});
+    if (!existsSync(absolute)) fail(`Local asset ${relativePath} does not exist`);
+    const realFile = realpathSync(absolute);
+    const realProject = realpathSync(project.projectDir);
+    if (!isInside(realProject, realFile)) {
+      fail(`Local asset ${relativePath} resolves outside the project (${realFile})`);
+    }
+    const declared = project.config.assets.find((asset) => asset.id === assetId);
+    if (declared && (declared.path !== relativePath || declared.kind !== requirement.kind)) {
+      fail(`Asset id ${assetId} is already declared with a different path or kind`);
+    }
+    if (declared && declared.approval !== 'approved') {
+      fail(`Asset ${assetId} is declared in project.json with approval ${declared.approval}; only approved assets can attach`);
+    }
+    const sha256 = sha256File(realFile);
+    const fileSizeBytes = statSync(realFile).size;
+    const technical = {
+      probed: 'unprobed', width: null, height: null, durationSeconds: null,
+      fps: null, hasAlpha: null, codec: null,
+    };
+    if (requirement.kind === 'video') {
+      const metadata = probeVideo(realFile, assetId);
+      technical.probed = 'video';
+      technical.width = metadata.width;
+      technical.height = metadata.height;
+      technical.durationSeconds = metadata.durationSeconds;
+      technical.fps = metadata.fps;
+      technical.hasAlpha = false;
+      technical.codec = metadata.codec;
+      const shot = (storyboardRaw?.chapters ?? planRaw?.chapters ?? [])
+        .flatMap((chapter) => chapter.shots ?? [])
+        .find((entry) => entry.id === requirement.shotIds[0]);
+      const fps = project.config.output.fps;
+      const inPointFrames = shot?.media?.sourceStartFrames ?? 0;
+      const neededSeconds = (inPointFrames + (requirement.durationFrames ?? 0)) / fps;
+      if (metadata.durationSeconds + 1e-3 < neededSeconds) {
+        fail(
+          `Video ${assetId} covers ${metadata.durationSeconds.toFixed(6)}s but requirement ${requirementId} needs ${neededSeconds.toFixed(6)}s from in-point ${inPointFrames} frames at ${fps}fps`,
+        );
+      }
+    } else if (requirement.kind === 'layer' || requirement.kind === 'image') {
+      const metadata = probeLayerPng(realFile, assetId);
+      technical.probed = requirement.kind === 'layer' ? 'layer' : 'image';
+      technical.width = metadata.width;
+      technical.height = metadata.height;
+      technical.hasAlpha = metadata.hasAlpha ?? metadata.colorType === 6;
+      technical.codec = 'png';
+      if (requirement.kind === 'layer' && technical.hasAlpha !== true) {
+        fail(`Layer ${assetId} has no alpha channel; a transparent PNG is required for ${requirementId}`);
+      }
+    } else if (requirement.kind === 'audio-reference') {
+      fail(`Requirement ${requirementId} is an ${requirement.kind}; attach audio sources through project.json instead`);
+    } else if (requirement.kind === 'scene-module') {
+      fail(`Requirement ${requirementId} is a scene module; declare it under scenes/ in the project`);
+    }
+    const record = {
+      requirementId,
+      assetId,
+      kind: requirement.kind === 'existing-asset' ? technical.probed === 'video' ? 'video' : 'image' : requirement.kind,
+      path: relativePath,
+      sha256,
+      fileSizeBytes,
+      fingerprint: requirement.fingerprint,
+      provenance,
+      rights,
+      review: 'pending',
+      reviewNotes: null,
+      recordedAtStoryboardRevision: (storyboardRaw?.revision ?? 1),
+      technical,
+    };
+    const records = (intake?.records ?? []).filter((entry) => entry.requirementId !== requirementId);
+    records.push(record);
+    records.sort((left, right) => left.requirementId.localeCompare(right.requirementId));
+    const document = validateAssetIntake(
+      {schemaVersion: 1, projectId, records},
+      {projectId, requirements},
+    );
+    writeProjectJson(boundary, PREPRODUCTION_PATHS.assetIntake, document);
+    console.log(JSON.stringify({
+      projectId,
+      requirementId,
+      assetId,
+      path: relativePath,
+      sha256,
+      fileSizeBytes,
+      technical,
+      review: 'pending',
+      note: 'Technical validation is not approval. Run review-asset --decision approve to bind this asset.',
+      output: PREPRODUCTION_PATHS.assetIntake,
+    }, null, 2));
+    return 0;
+  }
+
+  if (command === 'review-asset') {
+    const {project, boundary, requirements, intake, storyboardRaw} = loadInputs();
+    if (!intake) fail(`No ${PREPRODUCTION_PATHS.assetIntake} found; run attach-asset first`);
+    const requirementId = arg('requirement');
+    if (!requirementId) fail('--requirement is required');
+    const decision = arg('decision');
+    if (!['start-review', 'approve', 'reject'].includes(decision)) {
+      fail('--decision must be start-review, approve or reject');
+    }
+    const notes = arg('notes');
+    if (!notes) fail('--notes is required: record the reviewer decision');
+    const requirement = requirements.find((entry) => entry.id === requirementId);
+    if (!requirement) fail(`Unknown requirement ${requirementId}`);
+    const record = intake.records.find((entry) => entry.requirementId === requirementId);
+    if (!record) fail(`No intake record for requirement ${requirementId}`);
+    if (record.fingerprint !== requirement.fingerprint) {
+      fail(
+        `Intake for ${requirementId} is stale: the requirement changed after attachment, so this decision would bind the wrong asset. Run attach-asset again.`,
+      );
+    }
+    const absolute = resolveProjectRelativePath(project.projectDir, record.path, {engineRoot: repoRoot});
+    if (!existsSync(absolute)) fail(`Attached asset ${record.path} is no longer present`);
+    const currentHash = sha256File(absolute);
+    if (currentHash !== record.sha256) {
+      fail(`Attached asset ${record.path} changed since intake: expected ${record.sha256}, found ${currentHash}`);
+    }
+    const review = decision === 'start-review' ? 'in-review' : decision === 'approve' ? 'approved' : 'rejected';
+    const records = intake.records.map((entry) =>
+      entry.requirementId === requirementId ? {...entry, review, reviewNotes: notes} : entry,
+    );
+    const document = validateAssetIntake(
+      {schemaVersion: 1, projectId, records},
+      {projectId, requirements},
+    );
+    writeProjectJson(boundary, PREPRODUCTION_PATHS.assetIntake, document);
+    console.log(JSON.stringify({
+      projectId,
+      requirementId,
+      assetId: record.assetId,
+      review,
+      reviewNotes: notes,
+      verifiedSha256: currentHash,
+      storyboardRevision: storyboardRaw?.revision ?? null,
+      note: review === 'approved'
+        ? 'Asset is bound to the requirement; regenerate the storyboard and recompile.'
+        : 'The requirement stays unfulfilled until a reviewer approves it.',
+      output: PREPRODUCTION_PATHS.assetIntake,
+    }, null, 2));
+    return 0;
+  }
+
   if (command === 'compile') {
-    const {project, boundary, annotations, lyrics} = loadInputs();
+    const {project, boundary, annotations, lyrics, intake, continuity} = loadInputs();
     const storyboardRaw = readOptionalProjectJson(project.projectDir, PREPRODUCTION_PATHS.storyboard, {engineRoot: repoRoot});
     if (!storyboardRaw) fail('No storyboard found; run storyboard and approve-storyboard first');
-    const storyboard = validateStoryboard(storyboardRaw, project, annotations, lyrics);
-    const result = compileApprovedStoryboard({project, storyboard, annotations, lyrics, boundary});
+    const storyboard = validateStoryboard(storyboardRaw, project, annotations, lyrics, intake, continuity);
+    const result = compileApprovedStoryboard({project, storyboard, annotations, lyrics, intake, continuity, boundary});
     console.log(JSON.stringify(result.report, null, 2));
     return result.report.status === 'ready' ? 0 : 2;
   }

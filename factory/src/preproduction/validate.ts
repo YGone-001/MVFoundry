@@ -1,23 +1,44 @@
 import {PreproductionError} from '../errors';
-import type {ProjectAsset} from '../config/types';
+import type {MediaFit, ProjectAsset, ProjectAssetKind} from '../config/types';
 import type {
   AnnotationDocument,
   ApprovedBeatGrid,
   ApprovalStatus,
+  AssetIntakeDocument,
+  AssetIntakeRecord,
+  AssetIntakeReview,
   AssetRequirement,
   BeatGridInterpretation,
   BeatGridReport,
+  ContinuityDocument,
+  ContinuityEntry,
+  ContinuityFinding,
   CreativeBrief,
   CreativeBriefAssetNeed,
   CreativeBriefPacing,
+  CreativeBriefRendererDirective,
   LyricsDocument,
   LyricLine,
   ManualBeatAnchor,
   ManualBpm,
   ManualCutCue,
+  PlannedHybridLayer,
+  PlannedShotMedia,
   SectionAnnotation,
 } from './types';
-import {BEAT_GRID_ALGORITHM_VERSION} from './types';
+import {BEAT_GRID_ALGORITHM_VERSION, CONTINUITY_SCHEMA_VERSION, ASSET_INTAKE_SCHEMA_VERSION} from './types';
+
+const MEDIA_FITS: readonly ['contain', 'cover'] = ['contain', 'cover'];
+const CONTINUITY_KINDS = [
+  'character',
+  'location',
+  'appearance',
+  'prop',
+  'style',
+  'palette',
+  'lighting',
+  'camera',
+] as const;
 
 export type PreproductionContext = {
   projectId: string;
@@ -315,6 +336,133 @@ const validateAssetNeed = (value: unknown, index: number): CreativeBriefAssetNee
   return result;
 };
 
+const UNIT_RANGE = (value: unknown, field: string): number => {
+  const number_ = number(value, field);
+  if (number_ < 0 || number_ > 1) fail(`${field} must be in [0, 1]`);
+  return number_;
+};
+
+const validateMediaTransform = (
+  source: Record<string, unknown>,
+  field: string,
+): {fit: MediaFit; positionX: number; positionY: number; scale: number} => {
+  const fit = oneOf(source.fit === undefined ? 'cover' : source.fit, MEDIA_FITS, `${field}.fit`);
+  const positionX = source.positionX === undefined ? 0 : number(source.positionX, `${field}.positionX`);
+  const positionY = source.positionY === undefined ? 0 : number(source.positionY, `${field}.positionY`);
+  const scale = source.scale === undefined ? 1 : number(source.scale, `${field}.scale`);
+  if (!(scale > 0) || scale > 20) fail(`${field}.scale must be greater than 0 and at most 20`);
+  return {fit, positionX, positionY, scale};
+};
+
+/**
+ * Planned media is validated structurally here. The shot-local bounds that the
+ * project validator enforces (visibility inside the shot, frame-aligned
+ * in-points) are checked once the planner has produced real shot ranges.
+ */
+export const validatePlannedMedia = (
+  value: unknown,
+  renderer: string,
+  field: string,
+): PlannedShotMedia | null => {
+  if (value === null || value === undefined) return null;
+  const media = record(value, field);
+  const kind = oneOf(media.kind, ['video', 'hybrid'] as const, `${field}.kind`);
+  if (kind !== renderer) {
+    fail(`${field}.kind "${kind}" does not match the planned renderer "${renderer}"`);
+  }
+  const sourceStartFrames = integer(
+    media.sourceStartFrames,
+    `${field}.sourceStartFrames`,
+  );
+  const backgroundSlot = text(media.backgroundSlot, `${field}.backgroundSlot`);
+  const transform = validateMediaTransform(media, field);
+  if (kind === 'video') {
+    assertKeys(media, ['kind', 'backgroundSlot', 'sourceStartFrames', 'fit', 'positionX', 'positionY', 'scale'], field);
+    return {kind: 'video', backgroundSlot, sourceStartFrames, ...transform};
+  }
+  assertKeys(
+    media,
+    ['kind', 'backgroundSlot', 'sourceStartFrames', 'fit', 'positionX', 'positionY', 'scale', 'layers', 'overlay'],
+    field,
+  );
+  const rawLayers = array(media.layers, `${field}.layers`);
+  if (rawLayers.length === 0) fail(`${field}.layers must contain at least one layer`);
+  if (rawLayers.length > 16) fail(`${field}.layers must contain at most 16 layers`);
+  const layers: PlannedHybridLayer[] = rawLayers.map((layerValue, index) => {
+    const layerField = `${field}.layers[${index}]`;
+    const layer = record(layerValue, layerField);
+    assertKeys(
+      layer,
+      ['slot', 'order', 'opacity', 'fit', 'positionX', 'positionY', 'scale', 'visibleFromFrame', 'visibleToFrame'],
+      layerField,
+    );
+    const order = integer(layer.order, `${layerField}.order`);
+    if (order > 31) fail(`${layerField}.order must be at most 31`);
+    const visibleFromFrame = integer(layer.visibleFromFrame, `${layerField}.visibleFromFrame`);
+    const visibleToFrame = integer(layer.visibleToFrame, `${layerField}.visibleToFrame`, 1);
+    if (visibleFromFrame >= visibleToFrame) fail(`${layerField} visibility range must be non-empty`);
+    return {
+      slot: text(layer.slot, `${layerField}.slot`),
+      order,
+      opacity: layer.opacity === undefined ? 1 : UNIT_RANGE(layer.opacity, `${layerField}.opacity`),
+      ...validateMediaTransform(layer, layerField),
+      visibleFromFrame,
+      visibleToFrame,
+    };
+  });
+  const orders = new Set<number>();
+  const slots = new Set<string>();
+  for (const layer of layers) {
+    if (orders.has(layer.order)) fail(`${field}.layers contains duplicate order ${layer.order}`);
+    orders.add(layer.order);
+    if (slots.has(layer.slot)) fail(`${field}.layers contains duplicate slot ${layer.slot}`);
+    slots.add(layer.slot);
+    if (layer.slot === backgroundSlot) fail(`${field}.layers slot must differ from backgroundSlot`);
+  }
+  const overlay = record(media.overlay, `${field}.overlay`);
+  assertKeys(overlay, ['kind', 'intensity', 'color'], `${field}.overlay`);
+  return {
+    kind: 'hybrid',
+    backgroundSlot,
+    sourceStartFrames,
+    ...transform,
+    layers,
+    overlay: {
+      kind: oneOf(overlay.kind, ['rain', 'orbits', 'scan'] as const, `${field}.overlay.kind`),
+      intensity: overlay.intensity === undefined ? 0.5 : UNIT_RANGE(overlay.intensity, `${field}.overlay.intensity`),
+      color: overlay.color === undefined ? null : text(overlay.color, `${field}.overlay.color`),
+    },
+  };
+};
+
+const validateRendererDirective = (
+  value: unknown,
+  index: number,
+  context: PreproductionContext,
+): CreativeBriefRendererDirective => {
+  const field = `creativeBrief.rendererDirectives[${index}]`;
+  const directive = record(value, field);
+  assertKeys(directive, ['id', 'renderer', 'continuityIds', 'media'], field);
+  const renderer = text(directive.renderer, `${field}.renderer`);
+  if (!context.rendererKinds.has(renderer)) {
+    fail(`${field}.renderer references unregistered renderer ${renderer}`);
+  }
+  const isMediaRenderer = renderer === 'video' || renderer === 'hybrid';
+  if (!isMediaRenderer && directive.media !== undefined && directive.media !== null) {
+    fail(`${field}.media is only valid for the video and hybrid renderer directives`);
+  }
+  const media = isMediaRenderer ? validatePlannedMedia(directive.media, renderer, field) : null;
+  if (isMediaRenderer && media === null) {
+    fail(`${field}.media is required for the ${renderer} renderer directive`);
+  }
+  return {
+    id: text(directive.id, `${field}.id`),
+    renderer,
+    continuityIds: textArray(directive.continuityIds, `${field}.continuityIds`, 32),
+    media,
+  };
+};
+
 export const validateCreativeBrief = (
   raw: unknown,
   context: PreproductionContext,
@@ -343,6 +491,7 @@ export const validateCreativeBrief = (
       'excludedElements',
       'productionConstraints',
       'preferredRenderers',
+      'rendererDirectives',
       'requiredAssets',
       'assumptions',
     ],
@@ -379,6 +528,14 @@ export const validateCreativeBrief = (
     : array(brief.requiredAssets, 'creativeBrief.requiredAssets')
   ).map(validateAssetNeed);
   if (requiredAssets.length > 32) fail('creativeBrief.requiredAssets must contain at most 32 entries');
+  const rawDirectives = brief.rendererDirectives === undefined
+    ? []
+    : array(brief.rendererDirectives, 'creativeBrief.rendererDirectives');
+  if (rawDirectives.length > 32) fail('creativeBrief.rendererDirectives must contain at most 32 entries');
+  const rendererDirectives = rawDirectives.map((directive, index) =>
+    validateRendererDirective(directive, index, context),
+  );
+  uniqueIds(rendererDirectives, 'creativeBrief.rendererDirectives');
 
   return {
     schemaVersion: 1,
@@ -401,6 +558,7 @@ export const validateCreativeBrief = (
     excludedElements: textArray(brief.excludedElements, 'creativeBrief.excludedElements'),
     productionConstraints: textArray(brief.productionConstraints, 'creativeBrief.productionConstraints'),
     preferredRenderers,
+    rendererDirectives,
     requiredAssets,
     assumptions: textArray(brief.assumptions, 'creativeBrief.assumptions'),
   };
@@ -603,6 +761,130 @@ export const validateBeatGridReport = (
 export const requirementIds = (requirements: readonly AssetRequirement[]): Set<string> =>
   new Set(requirements.map((requirement) => requirement.id));
 
+const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+const INTAKE_REVIEWS: readonly AssetIntakeReview[] = ['pending', 'in-review', 'approved', 'rejected'];
+const PROJECT_ASSET_KINDS: readonly ProjectAssetKind[] = ['image', 'video', 'layer', 'audio-reference'];
+const INTAKE_PROBED: readonly AssetIntakeRecord['technical']['probed'][] = [
+  'video',
+  'layer',
+  'image',
+  'audio',
+  'unprobed',
+];
+
+const validateIntakeTechnical = (value: unknown, field: string): AssetIntakeRecord['technical'] => {
+  const technical = record(value, field);
+  assertKeys(
+    technical,
+    ['probed', 'width', 'height', 'durationSeconds', 'fps', 'hasAlpha', 'codec'],
+    field,
+  );
+  const nullablePositive = (raw: unknown, name: string): number | null => {
+    if (raw === null || raw === undefined) return null;
+    const parsed = number(raw, `${field}.${name}`);
+    if (parsed < 0) fail(`${field}.${name} must be non-negative`);
+    return parsed;
+  };
+  const nullableText = (raw: unknown, name: string): string | null =>
+    raw === null || raw === undefined ? null : text(raw, `${field}.${name}`);
+  const nullableBoolean = (raw: unknown, name: string): boolean | null =>
+    raw === null || raw === undefined ? null : boolean(raw, `${field}.${name}`);
+  return {
+    probed: oneOf(technical.probed, INTAKE_PROBED, `${field}.probed`),
+    width: nullablePositive(technical.width, 'width'),
+    height: nullablePositive(technical.height, 'height'),
+    durationSeconds: nullablePositive(technical.durationSeconds, 'durationSeconds'),
+    fps: nullablePositive(technical.fps, 'fps'),
+    hasAlpha: nullableBoolean(technical.hasAlpha, 'hasAlpha'),
+    codec: nullableText(technical.codec, 'codec'),
+  };
+};
+
+const validateIntakePath = (value: unknown, field: string): string => {
+  const raw = text(value, field);
+  if (raw.startsWith('/') || /^[a-zA-Z]:/.test(raw) || raw.startsWith('\\\\')) {
+    fail(`${field} must be project-relative, not absolute`);
+  }
+  if (raw.split(/[\\/]/).includes('..')) fail(`${field} must not traverse outside the project`);
+  if (raw.includes('\\')) fail(`${field} must use forward slashes`);
+  return raw;
+};
+
+/**
+ * Structural validation of recorded local asset intake. Byte verification and
+ * media probing happen when a record is created and again at compilation; this
+ * only guarantees the document is well formed and bound to real requirements.
+ */
+export const validateAssetIntake = (
+  raw: unknown,
+  context: {projectId: string; requirements: readonly AssetRequirement[]},
+): AssetIntakeDocument => {
+  const document = record(raw, 'assetIntake');
+  assertKeys(document, ['schemaVersion', 'projectId', 'records'], 'assetIntake');
+  if (document.schemaVersion !== ASSET_INTAKE_SCHEMA_VERSION) {
+    fail(`assetIntake.schemaVersion must be ${ASSET_INTAKE_SCHEMA_VERSION}`);
+  }
+  if (text(document.projectId, 'assetIntake.projectId') !== context.projectId) {
+    fail(`assetIntake.projectId must be ${context.projectId}`);
+  }
+  const rawRecords = array(document.records, 'assetIntake.records');
+  if (rawRecords.length > 256) fail('assetIntake.records must contain at most 256 entries');
+  const known = requirementIds(context.requirements);
+  const seen = new Set<string>();
+  const records = rawRecords.map((value, index) => {
+    const field = `assetIntake.records[${index}]`;
+    const recordValue = record(value, field);
+    assertKeys(
+      recordValue,
+      [
+        'requirementId',
+        'assetId',
+        'kind',
+        'path',
+        'sha256',
+        'fileSizeBytes',
+        'fingerprint',
+        'provenance',
+        'rights',
+        'review',
+        'reviewNotes',
+        'recordedAtStoryboardRevision',
+        'technical',
+      ],
+      field,
+    );
+    const requirementId = text(recordValue.requirementId, `${field}.requirementId`);
+    if (!known.has(requirementId)) fail(`${field}.requirementId ${requirementId} is not a project requirement`);
+    if (seen.has(requirementId)) fail(`${field}.requirementId ${requirementId} already has an intake record`);
+    seen.add(requirementId);
+    const sha256 = text(recordValue.sha256, `${field}.sha256`);
+    if (!SHA256_PATTERN.test(sha256)) fail(`${field}.sha256 must be 64 lowercase hex characters`);
+    const review = oneOf(recordValue.review, INTAKE_REVIEWS, `${field}.review`);
+    return {
+      requirementId,
+      assetId: text(recordValue.assetId, `${field}.assetId`),
+      kind: oneOf(recordValue.kind, PROJECT_ASSET_KINDS, `${field}.kind`),
+      path: validateIntakePath(recordValue.path, `${field}.path`),
+      sha256,
+      fileSizeBytes: integer(recordValue.fileSizeBytes, `${field}.fileSizeBytes`, 1),
+      fingerprint: text(recordValue.fingerprint, `${field}.fingerprint`),
+      provenance: text(recordValue.provenance, `${field}.provenance`),
+      rights: text(recordValue.rights, `${field}.rights`),
+      review,
+      reviewNotes:
+        recordValue.reviewNotes === null || recordValue.reviewNotes === undefined
+          ? null
+          : text(recordValue.reviewNotes, `${field}.reviewNotes`),
+      recordedAtStoryboardRevision: integer(
+        recordValue.recordedAtStoryboardRevision,
+        `${field}.recordedAtStoryboardRevision`,
+        1,
+      ),
+      technical: validateIntakeTechnical(recordValue.technical, `${field}.technical`),
+    } satisfies AssetIntakeRecord;
+  });
+  return {schemaVersion: ASSET_INTAKE_SCHEMA_VERSION, projectId: context.projectId, records};
+};
 const sameNumbers = (left: readonly number[], right: readonly number[]): boolean =>
   left.length === right.length && left.every((value, index) => value === right[index]);
 
@@ -786,3 +1068,198 @@ export const validateApprovedBeatGrid = (
     },
   };
 };
+
+const validateContinuityEntry = (
+  value: unknown,
+  index: number,
+  context: PreproductionContext,
+): ContinuityEntry => {
+  const field = `continuity.entries[${index}]`;
+  const entry = record(value, field);
+  assertKeys(
+    entry,
+    [
+      'id',
+      'identity',
+      'kind',
+      'description',
+      'shotIds',
+      'referenceAssetId',
+      'attributes',
+      'constraints',
+      'exclusions',
+      'approval',
+      'revision',
+      'supersedes',
+    ],
+    field,
+  );
+  const kind = oneOf(entry.kind, CONTINUITY_KINDS, `${field}.kind`);
+  const attributesValue = entry.attributes === undefined ? {} : record(entry.attributes, `${field}.attributes`);
+  const attributeKeys = Object.keys(attributesValue);
+  if (attributeKeys.length > 32) fail(`${field}.attributes must contain at most 32 entries`);
+  const attributes: Record<string, string> = {};
+  for (const key of attributeKeys) {
+    attributes[key] = text(attributesValue[key], `${field}.attributes.${key}`);
+  }
+  const referenceAssetId =
+    entry.referenceAssetId === null || entry.referenceAssetId === undefined
+      ? null
+      : text(entry.referenceAssetId, `${field}.referenceAssetId`);
+  if (referenceAssetId !== null) {
+    const asset = context.assets.find((candidate) => candidate.id === referenceAssetId);
+    if (!asset) fail(`${field}.referenceAssetId references unknown asset ${referenceAssetId}`);
+    if (asset.approval !== 'approved') {
+      fail(`${field}.referenceAssetId references unapproved asset ${referenceAssetId}`);
+    }
+    if (!['image', 'layer', 'video'].includes(asset.kind)) {
+      fail(`${field}.referenceAssetId must reference an image, layer or video asset`);
+    }
+  }
+  return {
+    id: text(entry.id, `${field}.id`),
+    identity: text(entry.identity, `${field}.identity`),
+    kind,
+    description: text(entry.description, `${field}.description`),
+    shotIds: textArray(entry.shotIds, `${field}.shotIds`, 256),
+    referenceAssetId,
+    attributes,
+    constraints: textArray(entry.constraints, `${field}.constraints`),
+    exclusions: textArray(entry.exclusions, `${field}.exclusions`),
+    approval: approval(entry.approval, `${field}.approval`),
+    revision: integer(entry.revision, `${field}.revision`, 1),
+    supersedes:
+      entry.supersedes === null || entry.supersedes === undefined
+        ? null
+        : text(entry.supersedes, `${field}.supersedes`),
+  };
+};
+
+export const validateContinuity = (
+  raw: unknown,
+  context: PreproductionContext,
+): ContinuityDocument => {
+  const document = record(raw, 'continuity');
+  assertKeys(document, ['schemaVersion', 'projectId', 'revision', 'entries'], 'continuity');
+  if (document.schemaVersion !== CONTINUITY_SCHEMA_VERSION) {
+    fail(`continuity.schemaVersion must be ${CONTINUITY_SCHEMA_VERSION}`);
+  }
+  if (text(document.projectId, 'continuity.projectId') !== context.projectId) {
+    fail(`continuity.projectId must be ${context.projectId}`);
+  }
+  const revision = integer(document.revision, 'continuity.revision', 1);
+  const rawEntries = array(document.entries, 'continuity.entries');
+  if (rawEntries.length > 256) fail('continuity.entries must contain at most 256 entries');
+  const entries = rawEntries.map((entry, index) => validateContinuityEntry(entry, index, context));
+  uniqueIds(entries, 'continuity.entries');
+
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  for (const entry of entries) {
+    if (entry.supersedes === null) continue;
+    const previous = byId.get(entry.supersedes);
+    if (!previous) fail(`continuity entry ${entry.id} supersedes unknown entry ${entry.supersedes}`);
+    if (previous.identity !== entry.identity || previous.kind !== entry.kind) {
+      fail(`continuity entry ${entry.id} may only supersede the same identity and kind`);
+    }
+    if (previous.revision >= entry.revision) {
+      fail(`continuity entry ${entry.id} must supersede an earlier revision only`);
+    }
+    if (entry.approval === 'approved' && previous.approval !== 'approved') {
+      fail(
+        `continuity entry ${entry.id} records an appearance change over an unapproved reference; approve ${previous.id} or replace it explicitly`,
+      );
+    }
+  }
+
+  // Two approved descriptions of the same identity are contradictory unless one
+  // explicitly supersedes the other, which is how an intentional appearance
+  // change is recorded and approved.
+  const approvedEntries = entries.filter((entry) => entry.approval === 'approved');
+  for (const [index, left] of approvedEntries.entries()) {
+    for (const right of approvedEntries.slice(index + 1)) {
+      if (left.identity !== right.identity || left.kind !== right.kind) continue;
+      if (left.supersedes === right.id || right.supersedes === left.id) continue;
+      fail(
+        `continuity identity "${left.identity}" has contradictory approved entries ${left.id} and ${right.id}; ` +
+          'record an explicit superseding entry to approve an appearance change',
+      );
+    }
+  }
+  return {schemaVersion: CONTINUITY_SCHEMA_VERSION, projectId: context.projectId, revision, entries};
+};
+
+const NEEDS_REFERENCE_ASSET: readonly ContinuityEntry['kind'][] = [
+  'character',
+  'location',
+  'appearance',
+  'prop',
+];
+
+/**
+ * Declarative continuity checking only. It compares explicit references; it
+ * never inspects pixels, faces or image similarity.
+ */
+export const checkContinuityUsage = (
+  document: ContinuityDocument,
+  shots: Array<{id: string; continuityIds: string[]}>,
+): ContinuityFinding[] => {
+  const findings: ContinuityFinding[] = [];
+  const byId = new Map(document.entries.map((entry) => [entry.id, entry]));
+  const referenced = new Map<string, string[]>();
+  for (const shot of shots) {
+    for (const id of shot.continuityIds) {
+      const list = referenced.get(id) ?? [];
+      list.push(shot.id);
+      referenced.set(id, list);
+      const entry = byId.get(id);
+      if (!entry) {
+        findings.push({
+          code: 'unknown-reference',
+          continuityId: id,
+          shotIds: [shot.id],
+          message: `shot ${shot.id} references unknown continuity entry ${id}`,
+        });
+        continue;
+      }
+      if (entry.approval !== 'approved') {
+        findings.push({
+          code: 'unapproved-reference',
+          continuityId: id,
+          shotIds: [shot.id],
+          message: `shot ${shot.id} references unapproved continuity entry ${id} (${entry.approval})`,
+        });
+      }
+    }
+  }
+  for (const entry of document.entries) {
+    const actual = referenced.get(entry.id) ?? [];
+    const declared = entry.shotIds;
+    const same =
+      actual.length === declared.length && [...actual].sort().join('|') === [...declared].sort().join('|');
+    if (!same) {
+      findings.push({
+        code: 'shot-declaration-mismatch',
+        continuityId: entry.id,
+        shotIds: [...new Set([...declared, ...actual])],
+        message:
+          `continuity entry ${entry.id} declares shots [${declared.join(', ')}] ` +
+          `but the storyboard references it from [${actual.join(', ')}]`,
+      });
+    }
+    if (entry.approval === 'approved' && entry.referenceAssetId === null && NEEDS_REFERENCE_ASSET.includes(entry.kind)) {
+      findings.push({
+        code: 'missing-reference-asset',
+        continuityId: entry.id,
+        shotIds: actual,
+        message: `continuity entry ${entry.id} (${entry.kind}) has no approved reference asset`,
+      });
+    }
+  }
+  return findings;
+};
+
+export const FATAL_CONTINUITY_CODES: readonly ContinuityFinding['code'][] = [
+  'unknown-reference',
+  'unapproved-reference',
+  'shot-declaration-mismatch',
+];

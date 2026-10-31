@@ -89,6 +89,10 @@ jobs:
         run: npm run preproduction:seed
       - name: Verify preproduction planning and storyboard preview
         run: npm run preproduction:verify
+      - name: Seed synthetic media-handoff workspace
+        run: npm run handoff:seed
+      - name: Verify media-aware storyboards and asset handoff
+        run: npm run handoff:verify
       - name: Publication audit
         run: npm run audit:publication
       - name: Git media audit

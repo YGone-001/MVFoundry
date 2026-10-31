@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "projectId": "synthetic-unresolved-media-demo",
+  "bpm": null,
+  "beatAnchors": [
+    {"id": "ANCHOR-01", "frame": 0, "timeSeconds": 0, "source": "user", "approval": "approved"}
+  ],
+  "cutCues": [],
+  "sections": [
+    {"id": "SEC-01", "label": "single", "startFrame": 0, "endFrame": 75, "source": "user", "approval": "approved"}
+  ]
+}

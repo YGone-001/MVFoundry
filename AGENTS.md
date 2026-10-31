@@ -102,6 +102,20 @@ Do not treat plans, prior reports or user summaries as proof of the current file
 - Storyboard previews must load the compiled candidate through the normal loader so the rendered shot selection actually comes from the approved storyboard. All generated plans, lyrics, assets, previews and reports stay external to Git.
 - No provider calls, image/video generation, transcription or real-song migration are authorized in this phase.
 
+### Media-aware storyboards and asset handoff
+
+- Planned Video/Hybrid media is intent, never configuration. It uses the accepted P1-C media vocabulary (`ShotVideoMedia` / `ShotHybridMedia` shapes) with no asset ID until an approved binding exists; there is no second media schema.
+- Renderer family is chosen per shot from `creative-brief.rendererDirectives`, so one storyboard can mix pixel/layered Canvas, project modules, Video and Hybrid shots. Never downgrade a missing Video or Hybrid shot to Canvas just to make compilation pass; the shot stays blocked.
+- Every planned media slot (`backgroundSlot`, each Hybrid layer `slot`) must map to exactly one requirement with the same `mediaSlot`, and its approved asset kind must match (`video` background, `layer` plate).
+- `attach-asset` only accepts a project-relative path inside the project, verifies existence, computes SHA256, probes real format (`probeVideo`, `probeLayerPng`), checks renderer compatibility and source-duration sufficiency, and records provenance and rights. It always lands as `review: "pending"`.
+- `review-asset` is the only path to `approved`. Technical validation never auto-approves, and a user rights declaration is a recorded assertion, not independent legal verification.
+- Intake records carry a requirement `fingerprint`. If the requirement changes, the record is stale: the requirement returns to unfulfilled and compilation stays blocked instead of binding the old bytes.
+- Approved intake assets that are not declared in `project.json` are added only to the compiled candidate's asset table. `project.json` is never rewritten, and the candidate is re-validated by the existing project validator and the normal loader/probe path at render time.
+- Embedded source-video audio stays muted; the project mix is the only final audio authority. `endBehavior: reject` is the only supported end-of-source policy.
+- Continuity is declarative only: `continuity.json` records identity, kind, attributes, shot references, optional approved reference assets, revision and explicit `supersedes`. Two approved entries with the same identity and kind are contradictory unless one supersedes the other. Never claim face, character or image-similarity checking.
+- Re-planning must not silently replace approved continuity entries, approved plans, approved storyboards or accepted assets; each needs an explicit new revision.
+- Production tasks are work orders, not assets. Status distinguishes needed, in-production, delivered, under-review, approved and rejected, and a stale record reads as needed again.
+
 ### Timeline and rendering
 
 - Integer output frames are the canonical editing clock; scene ranges are half-open `[startFrame, endFrame)`.
@@ -144,6 +158,12 @@ npm run preproduction -- analyze-beats --project synthetic-beat-demo
 npm run preproduction -- beat-grid-candidates --project synthetic-beat-demo
 npm run preproduction -- approve-beats --project synthetic-beat-demo --interpretation as-estimated --acknowledge-ambiguity --notes "<review>"
 npm run preproduction -- plan --project synthetic-beat-demo
+npm run handoff:seed
+npm run handoff:verify
+npm run preproduction -- continuity --project synthetic-mixed-timeline-demo
+npm run preproduction -- tasks --project synthetic-mixed-timeline-demo
+npm run preproduction -- attach-asset --project synthetic-mixed-timeline-demo --requirement REQ-001 --asset-id VID-HARBOUR --path intake/video/harbour-30fps.mp4 --provenance "<source>" --rights "<licence>"
+npm run preproduction -- review-asset --project synthetic-mixed-timeline-demo --requirement REQ-001 --decision approve --notes "<review>"
 npm run render:project -- --project synthetic-pixel-demo --mode video --frames 0-23
 npm run render:project -- --project synthetic-module-pixel-demo --mode video --frames 0-47
 npm run verify:modules
@@ -166,6 +186,33 @@ Set `MV_WORKSPACE_ROOT` to a path outside this repository. Set `REMOTION_BROWSER
 
 Agents that do not auto-discover `.agents/skills` must read this file and the five active Skill files explicitly. Native discovery is not universal across Codex, DeepSeek or other clients.
 
+## Development closeout lifecycle
+
+Every phase that changes the engine follows this order, and a phase is not complete until it does:
+
+```text
+Implementation
+    ↓
+Continuous AGENTS.md maintenance
+    ↓
+Local functional verification (real renders, not JSON only)
+    ↓
+Privacy/publication audit + Git media audit + actionlint
+    ↓
+Reviewed engine-only commit and normal push
+    ↓
+Remote CI completion and result verification for the exact pushed SHA
+    ↓
+Final Markdown report
+    ↓
+Local reports/ only
+```
+
+- `reports/` at the repository root is local engineering evidence. It is excluded through `.git/info/exclude` with the root-anchored rule `/reports/`, never committed, staged, pushed or uploaded as a CI artifact.
+- Do not create the phase Final Report before the remote pipeline for the exact final commit SHA reaches a verified terminal result. `queued` or `in_progress` is not success, and a previous commit's green run is not evidence.
+- A completed failing pipeline is `FAILED` or `PARTIALLY ACCEPTED`, not `ACCEPTED`. If the pipeline cannot be reached, report the blocker instead of writing a report that implies remote acceptance.
+- Verify after writing: `git check-ignore -v --no-index reports/<file>.md` must resolve to the exclude rule, and `git ls-files -- reports` must stay empty.
+
 ## Scope boundary
 
-The reusable engine supports declarative renderers, trusted project-local Canvas 2D scene modules, local Video/Hybrid media composition, multi-format audio ingestion, frame-locked multitrack mixing, deterministic cue analysis and a song-independent beat/section/lyrics/director/storyboard preproduction workflow. It does not start a real music-video production, generate media with AI, transcribe or fetch lyrics, migrate a private production, call providers, implement semantic music understanding or publish production scenes. Stop before unauthorized provider, publication or production work.
+The reusable engine supports declarative renderers, trusted project-local Canvas 2D scene modules, local Video/Hybrid media composition, multi-format audio ingestion, frame-locked multitrack mixing, deterministic cue analysis, a song-independent beat/section/lyrics/director/storyboard preproduction workflow, media-aware shot planning with production tasks, local asset handoff and declarative continuity. It does not start a real music-video production, generate media with AI, transcribe or fetch lyrics, migrate a private production, call providers, implement semantic music understanding, recognize visual identity in pixels, or publish production scenes. Stop before unauthorized provider, publication or production work.

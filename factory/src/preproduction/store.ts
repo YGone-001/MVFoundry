@@ -14,6 +14,9 @@ export const PREPRODUCTION_PATHS = {
   plan: `${PREPRODUCTION_DIR}/director-plan.json`,
   storyboard: `${PREPRODUCTION_DIR}/storyboard.json`,
   assetRequirements: `${PREPRODUCTION_DIR}/asset-requirements.json`,
+  productionTasks: `${PREPRODUCTION_DIR}/production-tasks.json`,
+  continuity: `${PREPRODUCTION_DIR}/continuity.json`,
+  assetIntake: `${PREPRODUCTION_DIR}/asset-intake.json`,
   candidate: `${PREPRODUCTION_DIR}/project-candidate.json`,
   compileReport: `${PREPRODUCTION_DIR}/compile-report.json`,
   missingAssets: `${PREPRODUCTION_DIR}/missing-assets.json`,
@@ -105,7 +108,7 @@ export const writeProjectJson = (
 };
 
 export const revisionPath = (
-  kind: 'director-plan' | 'storyboard' | 'approved-beat-grid',
+  kind: 'director-plan' | 'storyboard' | 'approved-beat-grid' | 'continuity',
   revision: number,
 ): string =>
   `${PREPRODUCTION_PATHS.revisions}/${kind}-r${String(revision).padStart(3, '0')}.json`;
