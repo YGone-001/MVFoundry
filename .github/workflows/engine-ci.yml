@@ -9,9 +9,6 @@ on:
 permissions:
   contents: read
 
-env:
-  MV_WORKSPACE_ROOT: ${{ runner.temp }}/mv-workspaces
-
 jobs:
   windows:
     name: Windows Node 20 filesystem security
@@ -31,6 +28,11 @@ jobs:
         run: npm run typecheck
       - name: Engine tests including junction behavior
         run: npm test
+      - name: Configure isolated synthetic workspace
+        shell: pwsh
+        run: |
+          $workspace = Join-Path $env:RUNNER_TEMP 'mvfoundry-synthetic-workspaces'
+          "MV_WORKSPACE_ROOT=$workspace" >> $env:GITHUB_ENV
       - name: Seed synthetic external workspace
         run: npm run seed:examples
       - name: Ensure Remotion browser
