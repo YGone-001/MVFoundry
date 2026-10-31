@@ -16,28 +16,31 @@ Owns editorial intent for any song. It does not assume a genre, cast, story, lan
 ## Input contract
 
 - `MV_WORKSPACE_ROOT` and a unique `projectId`.
-- `project.json` with audio path, duration policy, lyric/language metadata, narrative mode and visual profile.
+- `project.json` with master audio path/format/hash, duration policy, optional `audioTracks`, lyric/language metadata, narrative mode and visual profile.
 - The actual local soundtrack. If it is absent, marking analysis NOT RUN is mandatory.
 - Optional lyrics, rights notes, references and creative brief.
-- Measured analysis artifacts when available; their provenance must be stated.
+- The deterministic audio analysis report when available (`reports/audio-analysis-<projectId>.json`). Its RMS/onset events are `estimated`, with `confidence: null`; manual cues remain authoritative.
+- Planned SFX, voiceover, ambience and ducking regions as frame ranges, if the treatment requires them. Generation or approval of those sources is outside this skill.
 
 ## Required workflow
 
 1. Read the project config and audio metadata. Record file hashes and whether the source is measured, estimated or synthetic.
-2. Analyze actual structure: duration, tempo, sections, onsets, energy, vocal/instrumental balance and lyrical meaning. Do not invent beats.
+2. Analyze actual structure: duration, energy envelope, peaks, onset candidates and lyrical meaning. Tempo, meter, sections and vocal/instrumental balance may be described only from actual analysis the project has; the built-in onset report alone does not establish them. Do not invent beats.
 3. Decide the treatment: narrative, abstract, lyric-led, documentary, hybrid, or another explicit mode. State why.
 4. Build an emotional progression and a chapter plan. Chapters are broad song sections; shots are finer cinematic units.
 5. Convert every chapter and shot to integer output frames using half-open `[startFrame, endFrame)` ranges.
-6. Label each cue `measured`, `estimated` or `synthetic`. Never present an estimate as a measured onset.
-7. Write project-local plans under the workspace (`writing/`, project config, or a dated report). Never require an engine source edit for a new song.
-8. Verify chapter/shot coverage and hand off to `visual-identity-continuity`, `ai-shot-production` and `remotion-mv-compositor`.
-9. Run `music-video-quality-gate` before claiming completion.
+6. Label each cue `measured`, `estimated` or `synthetic`. Never present an estimate as a measured onset. Never overwrite manually approved cues with analysis output.
+7. Plan supplemental audio roles as output-frame ranges (`startFrame` and duration) and explicit gain/ducking intent. Do not place audio in frames that exceed the project duration or the decoded source.
+8. Write project-local plans under the workspace (`writing/`, project config, or a dated report). Never require an engine source edit for a new song.
+9. Verify chapter/shot coverage and hand off to `visual-identity-continuity`, `ai-shot-production` and `remotion-mv-compositor`.
+10. Run `music-video-quality-gate` before claiming completion.
 
 ## Output contract
 
 - A treatment and emotional progression.
 - A frame-domain chapter/shot plan with IDs, purpose, location, action, camera, motion and transitions.
 - Cue entries with provenance and validation status.
+- Optional audio-track direction: role, frame range, source in-point intent, gain/fade/ducking intention and whether each source is approved.
 - Updated `project.json` or workspace documents for the specific song.
 - A decision log listing assumptions, NOT RUN items and open questions.
 
@@ -45,6 +48,8 @@ Owns editorial intent for any song. It does not assume a genre, cast, story, lan
 
 - Assuming the song, language, story, cast, style or duration.
 - Inventing BPM, onsets, sections or lyric meaning.
+- Presenting the built-in RMS/onset detector as BPM, section, chorus, emotion, lyric or automatic music-understanding analysis.
+- Overriding manually approved cue points with analysis output.
 - Retiming, pitch-shifting, replacing or uploading the soundtrack.
 - Putting song-specific plans or media into the engine repository.
 - Calling generation providers or paid services.
@@ -55,7 +60,8 @@ Owns editorial intent for any song. It does not assume a genre, cast, story, lan
 - Every output frame is covered exactly once; no gap or overlap.
 - Every shot is inside one chapter and satisfies `startFrame < endFrame`.
 - Cue provenance is explicit; measured and estimated values are separated.
-- Audio timing is unchanged.
+- Analysis event frames use the same output-frame clock; sample quantization is bounded and documented.
+- Audio timing is unchanged; manual cues are not replaced by estimated events.
 - The project config validates without engine code changes.
 - No song-specific data or media was added to the engine repository.
 

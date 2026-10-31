@@ -87,6 +87,8 @@ test('G12: workflow runs the required engine and security commands', () => {
     'npm run media:seed',
     'npm run media:verify',
     'npm run render:project',
+    'npm run audio:seed',
+    'npm run audio:verify',
     'npm run audit:publication',
     'npm run audit:git',
   ]) {
@@ -94,9 +96,12 @@ test('G12: workflow runs the required engine and security commands', () => {
   }
   assert.match(workflow, /windows-latest/);
   assert.match(workflow, /node-version: 20/);
-  assert.match(workflow, /steps\.ffmpeg\.outputs\.available/);
+  assert.match(workflow, /timeout-minutes: 45/);
+  assert.doesNotMatch(workflow, /steps\.ffmpeg\.outputs\.available/);
+  assert.match(workflow, /Verify pinned FFmpeg\/FFprobe and required encoders/);
   assert.match(workflow, /Get-Command ffprobe/);
-  assert.match(workflow, /NOT RUN: system FFmpeg\/FFprobe is unavailable/);
+  assert.match(workflow, /FFmpeg\/FFprobe are unavailable after pinned provisioning/);
+  assert.match(workflow, /required encoder/);
   assert.doesNotMatch(workflow, /ubuntu-latest|node: \[/);
   assert.doesNotMatch(
     workflow,
@@ -126,22 +131,29 @@ test('G12: workspace is initialized from RUNNER_TEMP via GITHUB_ENV before seedi
   const browserIndex = names.indexOf('Ensure Remotion browser');
   const provisionIndex = names.indexOf('Provision pinned FFmpeg/FFprobe');
   const moduleIndex = names.indexOf('Module bundle and still render evidence');
-  const ffmpegIndex = names.indexOf('Check FFmpeg availability');
+  const ffmpegIndex = names.indexOf('Verify pinned FFmpeg/FFprobe and required encoders');
+  const typecheckIndex = names.indexOf('Typecheck');
+  const testIndex = names.indexOf('Engine tests including junction behavior');
   const mediaSeedIndex = names.indexOf('Seed synthetic media workspace');
   const mediaVerifyIndex = names.indexOf('Verify Video and Hybrid renderers');
   const shortVideoIndex = names.indexOf('Short synthetic video render');
-  const recordIndex = names.indexOf('Record media/video render limitation');
-  assert.ok(configureIndex >= 0 && seedIndex > configureIndex, 'configure must precede seeding');
+  const audioSeedIndex = names.indexOf('Seed synthetic audio workspace');
+  const audioVerifyIndex = names.indexOf('Verify multi-format audio, multitrack mix and cues');
+  assert.ok(provisionIndex >= 0 && ffmpegIndex > provisionIndex, 'FFmpeg provisioning must precede verification');
+  assert.ok(typecheckIndex > ffmpegIndex, 'FFmpeg must be provisioned and verified before typecheck');
+  assert.ok(testIndex > typecheckIndex, 'tests must follow typecheck');
+  assert.ok(configureIndex > testIndex, 'workspace setup must follow engine tests');
+  assert.ok(seedIndex > configureIndex, 'configure must precede seeding');
   assert.ok(browserIndex > seedIndex, 'browser setup must follow seeding');
-  assert.ok(provisionIndex > browserIndex, 'FFmpeg provisioning must follow browser setup');
-  assert.ok(moduleIndex > provisionIndex, 'module evidence must follow FFmpeg provisioning');
-  assert.ok(ffmpegIndex > moduleIndex, 'FFmpeg check must follow module evidence');
-  assert.ok(mediaSeedIndex > ffmpegIndex, 'media seeding must follow the FFmpeg check');
+  assert.ok(moduleIndex > browserIndex, 'module evidence must follow browser setup');
+  assert.ok(mediaSeedIndex > moduleIndex, 'media seeding must follow module evidence');
   assert.ok(mediaVerifyIndex > mediaSeedIndex, 'media verification must follow media seeding');
   assert.ok(shortVideoIndex > mediaVerifyIndex, 'module video render must follow media verification');
-  assert.ok(recordIndex > shortVideoIndex, 'limitation recording must follow video steps');
-  assert.ok(names.includes('Publication audit'));
-  assert.ok(names.includes('Git media audit'));
+  assert.ok(audioSeedIndex > shortVideoIndex, 'audio seeding must follow the module video render');
+  assert.ok(audioVerifyIndex > audioSeedIndex, 'audio verification must follow audio seeding');
+  assert.ok(names.indexOf('Publication audit') > audioVerifyIndex, 'publication audit must follow audio verification');
+  assert.ok(names.indexOf('Git media audit') > audioVerifyIndex, 'Git media audit must follow audio verification');
+  assert.ok(!names.includes('Record media/audio render limitation'), 'audio acceptance must not be skippable');
 
   const provision = steps[provisionIndex];
   const provisionText = provision.lines.join('\n');
@@ -154,15 +166,25 @@ test('G12: workspace is initialized from RUNNER_TEMP via GITHUB_ENV before seedi
   assert.match(provisionText, /GITHUB_PATH/);
   assert.doesNotMatch(workflow, /choco install|winget install|ffmpeg-release-full/i);
 
+  const encoderCheck = steps[ffmpegIndex].lines.join('\n');
+  for (const encoder of ['libx264', 'libmp3lame', 'aac', 'flac']) {
+    assert.ok(encoderCheck.includes(encoder), `FFmpeg verification is missing ${encoder}`);
+  }
+
   const mediaSeed = steps[mediaSeedIndex];
   const mediaVerify = steps[mediaVerifyIndex];
   const shortVideo = steps[shortVideoIndex];
-  const limitation = steps[recordIndex];
-  assert.match(mediaSeed.lines.join('\n'), /if: steps\.ffmpeg\.outputs\.available == 'true'/);
-  assert.match(mediaVerify.lines.join('\n'), /if: steps\.ffmpeg\.outputs\.available == 'true'/);
-  assert.match(shortVideo.lines.join('\n'), /if: steps\.ffmpeg\.outputs\.available == 'true'/);
-  assert.match(limitation.lines.join('\n'), /if: steps\.ffmpeg\.outputs\.available != 'true'/);
-  assert.match(limitation.lines.join('\n'), /NOT RUN: system FFmpeg\/FFprobe is unavailable/);
+  const audioSeed = steps[audioSeedIndex];
+  const audioVerify = steps[audioVerifyIndex];
+  for (const [name, step] of [
+    ['media seed', mediaSeed],
+    ['media verify', mediaVerify],
+    ['short video', shortVideo],
+    ['audio seed', audioSeed],
+    ['audio verify', audioVerify],
+  ] as const) {
+    assert.doesNotMatch(step.lines.join('\n'), /^\s*if:/m, `${name} must not be conditionally skipped`);
+  }
 });
 
 test('G12: the original workflow-level runner.temp expression fails validation', () => {

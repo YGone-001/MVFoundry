@@ -10,6 +10,15 @@
 - For a 24fps project with 12fps pixel sampling, each drawing is held for two output frames.
 - Sampling cannot move a cut or change soundtrack timing.
 
+## Audio clock
+
+- The integer output frame remains the editing clock. Audio maps through `Math.round(frame * sampleRate / outputFps)` with half-open frame ranges.
+- 44,100/24 is supported: frame 25 maps to sample 45,938, and frames `[24, 41)` own 31,238 samples.
+- The project mix contains `Math.round(durationInFrames * sampleRate / outputFps)` samples at the configured 44.1 or 48 kHz mix rate.
+- A render subrange `[start, end]` muxes the mix interval `[start, end + 1)`. It never restarts the soundtrack from sample 0.
+- Video and audio durations may differ by the sub-sample rounding remainder; the video frame count is unchanged.
+- Fades and automation are declared in frames and applied in the sample domain.
+
 ## Project preview
 
 ```bash
@@ -30,13 +39,19 @@ npm run media:seed
 npm run media:verify
 npm run render:project -- --project synthetic-video-demo --mode video --frames 0-47
 npm run render:project -- --project synthetic-hybrid-demo --mode video --frames 0-44
+npm run audio:seed
+npm run audio:verify
+npm run render:project -- --project synthetic-audio-mp3-demo --mode video --frames 0-47
+npm run render:project -- --project synthetic-audio-multitrack-demo --mode video --frames 0-59
+npm run render:project -- --project synthetic-audio-boundaries-demo --mode video --frames 24-40
 ```
 
 Requirements:
 
 - `MV_WORKSPACE_ROOT` points to an external workspace.
 - The project is validated and its approved media is staged into the project cache.
-- System FFmpeg and FFprobe are on `PATH` for video asset validation, media fixture generation and video encoding; stills without media do not need FFmpeg.
+- System FFmpeg and FFprobe are on `PATH` for audio decoding/mixing, video asset validation, media fixture generation and video encoding; stills without media or non-WAV audio do not need FFmpeg.
+- Non-WAV masters/tracks require FFmpeg to probe, decode and normalize; a missing tool fails the load or mix explicitly.
 - `REMOTION_BROWSER_EXECUTABLE` or `CHROME_PATH` can point to a browser; otherwise Remotion manages its own.
 
 ## Output override policy
@@ -48,19 +63,20 @@ Requirements:
 
 ## Pipeline
 
-1. Load and validate the project, including `sceneModules`, `moduleParams` and typed `media`.
-2. Verify the audio hash/duration, approved asset hashes, declared module hashes and FFprobe/PNG metadata.
-3. Reject unsupported, corrupt, unapproved, VFR/rotated video or non-alpha layer PNGs.
+1. Load and validate the project, including `sceneModules`, `moduleParams`, typed `media` and `audioTracks`.
+2. Verify the master audio format/decoded duration/hash, approved asset hashes, declared module hashes and FFprobe/PNG/audio metadata.
+3. Reject unsupported, corrupt, unapproved, VFR/rotated video, non-alpha layer PNGs or unsupported/multichannel audio.
 4. Apply the module source policy and refuse undeclared, unapproved, linked or mismatched modules.
-5. Validate that each video source in-point plus shot duration fits the source under `reject`.
+5. Validate that each video source in-point plus shot duration fits the source under `reject`, and that track source ranges fit decoded audio.
 6. Stage approved assets and audio into `cache/render-public`.
-7. Copy verified module bytes into `cache/engine-bundle/modules/` and generate `cache/engine-bundle/entry.tsx` with explicit static imports.
-8. Bundle that entry locally with the project's staged media as `publicDir`; the bundle output stays in `cache/engine-bundle/bundle/`.
-9. Bind module exports into a bundle-local renderer registry; built-in renderers remain available and module IDs are namespaced.
-10. Resolve each shot from the output frame. Canvas renderers draw with renderer-local sampling; Video/Hybrid renderers use shot-local React media Sequences.
-11. Save lossless PNG frames to `cache/frames` copied into `cache/sequence`.
-12. Encode with system FFmpeg: H.264, configured pixel format, BT.709 tags, optional AAC from the approved soundtrack.
-13. Write the output, render report and metadata under the external project.
+7. For video renders, decode/normalize every active audio source, build the single deterministic PCM mix, write it under `cache/audio-mix/`, and write the mix and analysis reports. Copy the mix into the staged public directory so preview `<Audio>` uses the same audio authority.
+8. Copy verified module bytes into `cache/engine-bundle/modules/` and generate `cache/engine-bundle/entry.tsx` with explicit static imports.
+9. Bundle that entry locally with the project's staged media as `publicDir`; the bundle output stays in `cache/engine-bundle/bundle/`.
+10. Bind module exports into a bundle-local renderer registry; built-in renderers remain available and module IDs are namespaced.
+11. Resolve each shot from the output frame. Canvas renderers draw with renderer-local sampling; Video/Hybrid renderers use shot-local React media Sequences.
+12. Save lossless PNG frames to `cache/frames` copied into `cache/sequence`.
+13. Slice the frame-range audio from the mix when rendering a subrange, then encode with system FFmpeg: H.264, configured pixel format, BT.709 tags, and exactly one AAC stream from that mix. Embedded video audio remains muted.
+14. Write the output, render report, mix report, analysis report and metadata under the external project.
 
 ## Video and Hybrid rendering
 
@@ -96,7 +112,53 @@ npm run media:seed
 npm run media:verify
 ```
 
-`media:seed` generates synthetic 30fps/24fps H.264 MP4s with embedded 950 Hz audio, transparent RGBA PNG layers, WAV soundtracks and hash-approved manifests inside the external workspace. `media:verify` renders representative stills and complete videos for both media projects, samples decoded source colors at cut/in-point frames, checks PNG alpha and layer compositing, verifies H.264 dimensions/fps/frame counts, confirms one soundtrack audio stream, and checks embedded source audio is muted with FFmpeg band analysis. Reports are written externally to `reports/media-render-evidence.json`.
+`media:seed` generates synthetic 30fps/24fps H.264 MP4s with embedded 950 Hz audio, transparent RGBA PNG layers, WAV soundtracks and hash-approved manifests inside the external workspace. `media:verify` renders representative stills and complete videos for both media projects, samples decoded source colors at cut/in-point frames, checks PNG alpha and layer compositing, verifies H.264 dimensions/fps/frame counts, confirms one audio stream from the project mix, and checks embedded source audio is muted with FFmpeg band analysis. Reports are written externally to `reports/media-render-evidence.json`.
+
+## Audio rendering
+
+### Inputs and normalization
+
+- The master keeps its declared `audio` path/hash/format/duration policy. Supplemental SFX, voiceover and ambience tracks are declared in `audioTracks`.
+- WAV uses the pure Node PCM header; MP3, FLAC and AAC-in-M4A require FFprobe plus an FFmpeg decode-duration pass. Actual content is probed; extensions are ignored.
+- Every active source is decoded to stereo signed 16-bit PCM at `audio.mixSampleRate` (44.1 or 48 kHz). Resampling and channel conversion are performed by FFmpeg; mixing is deterministic Node code.
+- Normalized copies are written to `<project>/cache/audio-normalized/`; the authored source is never modified.
+
+### Mix and mux
+
+- Each track maps `startFrame`, `durationFrames` and `sourceStartSeconds` to a half-open sample interval. The master spans the whole project.
+- Gain, linear fades and bounded linear dB automation are applied in the sample domain. Overlapping tracks are summed.
+- If the summed peak exceeds `0.999`, one global deterministic gain is applied. The mix report records peak before/after, limiter gain, `wouldClipSamples` and `clippedSamples`; no whole-song loudness normalization is applied.
+- The final mix is `<project>/cache/audio-mix/<projectId>-mix.wav`; the report is `<project>/reports/audio-mix-<projectId>.json`.
+- The final MP4 muxes AAC exactly once from the mix. For a subrange `[start, end]`, the segment `[start, end + 1)` is sliced first and muxed instead.
+- Video renders build the mix before preview; still renders do not produce an audio mix.
+- Remotion `<Audio>` uses the same mix WAV for preview. Final output is AAC of that mix, so preview/final are semantically aligned but not sample-identical.
+- Embedded video audio is always muted.
+
+### Cue analysis
+
+`reports/audio-analysis-<projectId>.json` contains deterministic RMS/peak envelopes, peak position and estimated onset candidates. Each event records the source hash, algorithm version, parameters, time/frame, `estimated` classification, `confidence: null` and an energy metric. It is not tempo/section/lyric analysis and never replaces manual cues.
+
+### Audio verification
+
+```bash
+npm run audio:seed
+npm run audio:verify
+```
+
+`audio:seed` generates a 24fps MP3-master project with a PCM reference, a 30fps FLAC + WAV SFX/voice + AAC/M4A ambience Hybrid project, and a 24fps 44.1 kHz click/boundary project. `audio:verify` renders them and analyzes the actual decoded output:
+
+- FFprobe stream metadata and one audio stream;
+- decoded output sample count against the frame-range boundary;
+- MP3 burst timing versus the PCM reference;
+- per-band gain for master/SFX/voice/ambience and silence outside track intervals;
+- fades and the explicit 8 dB manual ducking envelope;
+- muted 950 Hz embedded video audio;
+- nonzero subrange offsets and odd-frame shot cut;
+- estimated onset frames 6, 25 and 36 plus sample-domain boundaries;
+- sample-level pulse evidence: the 44.1 kHz fixture’s 10 ms coarse window begins before a click, so the report distinguishes the window start from the physical 10%-peak leading edge (+0.317 ms) and the 12 ms pulse centroid (~+6 ms); this is measurement geometry, not timeline drift;
+- source hash preservation.
+
+Reports are written to each project's `reports/audio-render-evidence.json`. Skips are NOT RUN, never PASS.
 
 ## Project scene module rendering
 
@@ -125,9 +187,13 @@ This bundles both synthetic module projects and renders stills at hold boundarie
 - Report: external `reports/render-<projectId>-<mode>.json`.
 - Module evidence: external `reports/module-render-evidence.json` and `renders/evidence-*.png`.
 - Media evidence: external `reports/media-render-evidence.json` and `renders/media-evidence-*.png`.
+- Audio mix: external `reports/audio-mix-<projectId>.json` and `cache/audio-mix/<projectId>-mix.wav`.
+- Audio analysis: external `reports/audio-analysis-<projectId>.json`.
+- Audio evidence: external `reports/audio-render-evidence.json`.
+- Normalized sources: external `cache/audio-normalized/`.
 - Frames and temp data: external `cache/`.
 - Generated entry, module copies and webpack bundle: external `cache/engine-bundle/`.
-- Synthetic media sources: generated only inside the external media workspace; never committed.
+- Synthetic media/audio sources: generated only inside the external workspace; never committed.
 
 No output is written into this repository. Cache recreation is restricted to strict descendants of `<project>/cache`; `render-public`, frames, sequences and temp are validated through the write boundary before any deletion. Node path APIs cannot eliminate concurrent filesystem races; see `docs/workspace-safety.md`.
 
@@ -155,4 +221,12 @@ For Video/Hybrid acceptance, `npm run media:verify` additionally checks:
 - one audio stream and muted embedded source audio using FFmpeg band analysis;
 - source hashes before and after rendering.
 
-A skipped media/video step is NOT RUN, never PASS.
+For audio acceptance, `npm run audio:verify` decodes the actual output audio. Check:
+
+- the container/stream count, sample rate and decoded sample count;
+- burst/onset timing against synthetic expectations and the PCM reference;
+- measured gain/fade/ducking levels and silence outside track intervals;
+- nonzero subrange alignment and odd-frame cut behavior;
+- master/track source hashes before and after rendering.
+
+An MP4 containing an AAC stream is not, by itself, evidence of correct audio mixing. A skipped media/audio step is NOT RUN, never PASS.

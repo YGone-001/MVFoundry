@@ -124,7 +124,7 @@ test('media configuration rejects wrong kinds, renderer mismatches and unsafe ti
     [
       'audio-enabled',
       (config) => (config.chapters[0].shots[0].media.muted = false),
-      /soundtrack is the only authorized audio/,
+      /project audio mix is the only final audio authority/,
     ],
     [
       'invalid-end-behavior',

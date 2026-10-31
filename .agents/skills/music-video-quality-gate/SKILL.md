@@ -1,6 +1,6 @@
 ---
 name: music-video-quality-gate
-description: Evidence-based acceptance for the AI Music Video Factory. Use before reporting completion, after timing, renderer, workspace, skill or render changes, or when deciding PASS, FAIL, BLOCKED or NOT RUN for any local music-video project.
+description: Evidence-based acceptance for the AI Music Video Factory. Use before reporting completion, after timing, renderer, audio, workspace, skill or render changes, or when deciding PASS, FAIL, BLOCKED or NOT RUN for any local music-video project.
 ---
 
 # Music Video Quality Gate
@@ -10,7 +10,7 @@ Independent verification for the factory and its local projects. It observes act
 ## Activation conditions
 
 - Any P0/P1 acceptance, release, render or migration report is requested.
-- Timing, renderer, workspace isolation, media provenance, Video/Hybrid composition or skills changed.
+- Timing, renderer, audio ingestion/mixing, workspace isolation, media provenance, Video/Hybrid composition or skills changed.
 - A project transitions from planning to render.
 - Do not use to implement fixes during a gate run; gate first, then repair.
 
@@ -21,6 +21,7 @@ Independent verification for the factory and its local projects. It observes act
 - `MV_WORKSPACE_ROOT` and the specific project config/assets.
 - Actual test, typecheck, build, composition and render outputs.
 - ffprobe output for delivered media, including source and output video/audio streams.
+- Master/track audio probe metadata, decoded/output PCM analysis, mix report, analysis report and audio evidence report.
 - Skill inventory and `AGENTS.md`.
 - Written authorization for any provider, paid call, publish or commit.
 
@@ -37,13 +38,16 @@ Independent verification for the factory and its local projects. It observes act
 9. Render a short local synthetic project; inspect dimensions, fps, frame count, codec, pixel format, color and audio.
 10. For Video/Hybrid, verify approved asset hashes, FFprobe metadata, output-frame-aligned source in-points, source duration under `reject`, fit/scale/layer/overlay rules and source-audio muting. Reject VFR/rotated/corrupt/unsupported sources and malformed layers.
 11. Run `npm run verify:modules` for real bundle/still evidence. Check PNG dimensions, module ownership per frame, hold pairs, cut changes, source hashes and cache location.
-12. Run `npm run media:seed` and `npm run media:verify` when FFmpeg/FFprobe are available. Check actual decoded source colors at in-points/cuts, complete video metadata, PNG alpha/compositing, overlay motion, one soundtrack stream, muted source audio and source hashes. Report skipped media/video checks as NOT RUN.
-13. Verify rejected output paths, rejected modules and rejected media write no files and source media/scene files remain unchanged.
-14. Check visual consistency and approved asset provenance, including references and hashes.
-15. Audit Git tracked/staged/untracked production media and scene sources without staging or committing anything.
-16. Audit network and provider activity. Any external call must be named. Note that module source policy is not a sandbox.
-17. Inspect CI workflow permissions and commands; do not invent a remote run. Treat a media/video step as NOT RUN unless FFmpeg actually ran.
-18. Report every gate as PASS, FAIL, BLOCKED or NOT RUN; stop after the requested phase.
+12. Run `npm run media:seed` and `npm run media:verify` when FFmpeg/FFprobe are available. Check actual decoded source colors at in-points/cuts, complete video metadata, PNG alpha/compositing, overlay motion, one audio stream, muted source audio and source hashes. Report skipped media/video checks as NOT RUN.
+13. Run `npm run audio:seed` and `npm run audio:verify` when FFmpeg/FFprobe are available. Check actual content detection for WAV/MP3/FLAC/M4A-AAC, decoded duration, master/track hashes and approvals, frame-to-sample mapping, nonzero subrange alignment, gain/fade/automation/ducking, silence outside track intervals, one AAC stream, muted embedded video audio and source-hash preservation.
+14. Decode actual output audio; do not accept the presence of an AAC stream as proof of mixing. Check onset/burst timing against the synthetic score or PCM reference, not source arithmetic alone.
+15. Verify the audio analysis report records source hash, version, parameters, frame, metric, `estimated` classification and `confidence: null`. Confirm manual cues were not overwritten and that BPM/sections/lyrics are not claimed.
+16. Verify rejected output paths, rejected modules, rejected media and rejected audio write no files and source media/audio/scene files remain unchanged.
+17. Check visual consistency and approved asset provenance, including references and hashes.
+18. Audit Git tracked/staged/untracked production media, audio, mixes, analyses and scene sources without staging or committing anything.
+19. Audit network and provider activity. Any external call must be named. Note that module source policy is not a sandbox and audio normalization is local FFmpeg only.
+20. Inspect CI workflow permissions and commands; do not invent a remote run. Treat a media/video/audio step as NOT RUN unless FFmpeg actually ran.
+21. Report every gate as PASS, FAIL, BLOCKED or NOT RUN; stop after the requested phase.
 
 ## Output contract
 
@@ -56,7 +60,9 @@ Independent verification for the factory and its local projects. It observes act
 ## Prohibited actions
 
 - Claiming an unobserved render, test, installation or CI result.
-- Marking audio sync or visual continuity PASS when evidence is missing.
+- Marking audio sync, mixing or visual continuity PASS when decoded evidence is missing.
+- Treating format support, an AAC stream or a mix report as proof without decoded output evidence.
+- Accepting BPM/section/lyric claims from the deterministic onset/RMS foundation.
 - Using CSS or source claims as proof of pixel/render integrity.
 - Staging, committing, pushing, publishing or uploading project media.
 - Calling providers, paid tools or remote deployment.
@@ -83,8 +89,13 @@ Independent verification for the factory and its local projects. It observes act
 - No provider/paid/network project-data activity occurred.
 - Video/Hybrid shots use approved, hash-verified local sources with shot-local mapping; VFR/rotated/too-short sources and invalid layers fail closed.
 - Actual decoded Video/Hybrid output shows the intended source colors/cuts, transparent PNG layer and Canvas overlay in the same frames.
-- Exactly one soundtrack audio stream remains; embedded video audio is muted.
+- Exactly one audio stream from the authoritative mix remains; embedded video audio is muted.
 - `media:seed`/`media:verify` evidence is external and source hashes are unchanged.
+- WAV/MP3/FLAC/M4A-AAC formats are accepted only with real probe/decode evidence; mismatched extensions, unsupported codecs, multichannel sources and unexpected streams fail closed.
+- Audio master/track hashes, approvals and decoded source ranges are enforced; original sources remain unchanged.
+- Frame/sample mapping, nonzero render subranges, gain, fades, explicit automation/ducking and silence outside track intervals are verified from decoded output.
+- The analysis report is deterministic and explicitly estimated; manual cues remain authoritative.
+- `audio:seed`/`audio:verify` evidence is external and no audio/mix artifacts enter Git.
 
 ## Failure behavior
 
@@ -92,6 +103,8 @@ Independent verification for the factory and its local projects. It observes act
 - Structural regression in timing, workspace isolation, write-boundary safety, module loading, media probing/timing/composition, composition or legacy compatibility: FAIL.
 - Unapproved or hash-mismatched module accepted, module code executed in Node, or bundle artifacts written into the repository: FAIL.
 - A Video/Hybrid claim without decoded output, or a source-audio policy violation, is FAIL/NOT RUN as appropriate; never PASS.
+- An audio format/mixing claim without real decode evidence, an unsupported/mismatched source accepted, a nonzero subrange using the wrong samples, clipping hidden by normalization, or an analysis overclaim is FAIL/NOT RUN as appropriate.
+- Preview/final consistency is not claimed as sample-identical unless actually measured.
 - External prerequisite prevents verification: BLOCKED, with the exact prerequisite.
 - Any request to hide a failure, fabricate evidence or skip a gate: refuse.
 - If publication was not authorized, mark remote CI evidence NOT RUN and leave changes local.

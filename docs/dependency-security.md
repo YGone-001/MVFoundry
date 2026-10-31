@@ -62,7 +62,15 @@ SHA256:      7c09a4c6bd73a5013963f06b1c6175326605cbc2585444ebe0f740ef4f35b4c9
 License:     GPL shared Windows build (transient CI test tooling)
 ```
 
-The workflow downloads that exact asset, compares the SHA256 with `Get-FileHash`, extracts it under `RUNNER_TEMP`, and verifies both `ffmpeg.exe` and `ffprobe.exe` before any media step. The binaries are not committed, redistributed by the repository, or uploaded as artifacts. The GPL build is used because the engine's `libx264` encoding path requires it; this is a CI test dependency, not a bundled engine component. If the pinned asset or checksum is unavailable, CI fails rather than silently skipping with a successful media claim.
+The workflow downloads that exact asset, compares the SHA256 with `Get-FileHash`, extracts it under `RUNNER_TEMP`, and verifies both `ffmpeg.exe` and `ffprobe.exe` before any media or audio step. It also verifies that the pinned build exposes the required `libx264`, `libmp3lame`, `aac` and `flac` encoders. The binaries are not committed, redistributed by the repository, or uploaded as artifacts. The GPL build is used because the engine's `libx264` and MP3 encoding paths require it; this is a CI test dependency, not a bundled engine component. If the pinned asset, checksum or required encoder is unavailable, CI fails rather than silently skipping media/audio acceptance. Audio and media verification steps are unconditional in the Windows job.
+
+## Audio engine dependency impact
+
+Multi-format audio ingestion, frame-locked mixing and cue analysis add **no npm dependency**. The implementation uses Node's built-in `child_process`, `crypto` and typed arrays, the existing FFmpeg/FFprobe system tools for decoding and normalization, and small local parsers for 16-bit PCM WAV. No commercial audio SDK, AI model, speech service or remote analysis API is used.
+
+The pinned Windows CI FFmpeg build is the same checksum-verified BtbN GPL shared build used for Video/Hybrid acceptance. MP3 (`libmp3lame`), FLAC and AAC decode/encode capability comes from that external build; FFmpeg is not bundled, committed or uploaded. Its decoder security surface and GPL/commercial licensing implications remain the operator's responsibility and are recorded in `THIRD_PARTY_NOTICES.md`.
+
+Dependency entries and the lockfile are unchanged by this feature. The `zod@4.5.4` advisory set above remains visible and unresolved. FFmpeg-dependent unit tests skip on hosts without FFmpeg and execute in CI after the pinned provisioning step; audio render evidence is reported NOT RUN when the tools are unavailable.
 
 ## External scene-module dependency impact
 

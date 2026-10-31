@@ -67,11 +67,26 @@ Do not treat plans, prior reports or user summaries as proof of the current file
 
 - Video sources must be approved project assets of kind `video`, project-relative, SHA256-verified and FFprobe-validated before rendering. Only local MP4/H.264 constant-frame-rate, zero-rotation sources are supported.
 - Validate source in-point alignment to the output frame, source duration against the shot range, fit/scale/position and the fail-closed `reject` end behavior.
-- Embedded video audio must remain muted. The approved project soundtrack is the only authorized audio output.
+- Embedded video audio must remain muted. The single authoritative project audio mix is the only authorized audio output.
 - Hybrid layers must be approved `layer` assets and 8-bit RGBA or grayscale-alpha PNGs. Enforce explicit order, opacity, fit/position/scale, shot-local visibility and supported overlays.
 - Do not add HTTP media sources, unrestricted remote URLs or cross-project asset references.
-- Synthetic video/PNG/WAV fixtures are generated with FFmpeg into an external disposable workspace; never commit generated media or place it in the engine repository.
-- Do not use a real production workspace for synthetic media seeding or verification.
+- Synthetic video/PNG/audio fixtures are generated with FFmpeg into an external disposable workspace; never commit generated media or place it in the engine repository.
+- Do not use a real production workspace for synthetic media or audio seeding/verification.
+
+### Audio engine
+
+- The master `audio` declaration remains the duration/timeline authority. Do not create a second master soundtrack through `audioTracks`; supplemental roles are `sfx`, `voiceover` and `ambience`.
+- Supported master/track formats are `wav-pcm`, `mp3`, `flac` and `m4a-aac`. Detect content with the WAV header or FFprobe; never trust the filename extension.
+- Every audio source must be an approved `audio-reference` project asset with a project-relative path, SHA256, source label and rights record. When `audio.assetId` is present it must exactly match the master path and hash.
+- Verify decoded duration. Use 0.02 s tolerance for WAV and `max(0.05 s, 1/outputFps)` for lossy formats. Do not confuse MP3/AAC encoder priming with timeline drift.
+- Map audio only through the integer output-frame clock: `Math.round(frame * sampleRate / outputFps)`, half-open ranges. Mix sample rate is 44.1 or 48 kHz. Preserve nonzero render subranges by slicing the corresponding mix interval, never the start of the track.
+- Decode/normalize with local FFmpeg to stereo signed 16-bit PCM at the project mix rate. Mix deterministically in Node. Do not accept FFmpeg filtergraphs, shell strings or arbitrary commands from project configuration.
+- Use a documented headroom policy: apply one global deterministic limiter gain only when the summed peak exceeds 0.999; report peak before/after, limiter gain and clipping diagnostics. Never silently normalize a whole song to hide clipping.
+- Fades and automation are frame-declared and sample-applied. Master automation is project-local; track automation is relative to the track start. Ducking must be an explicit envelope, not claimed as intelligent detection.
+- Produce one project-local PCM mix and mux exactly one AAC stream from it. Do not mix Remotion preview audio, embedded video audio and FFmpeg output as competing final authorities.
+- Analysis must record source hash, algorithm version, parameters, timestamp, frame, evidence metric and `estimated` provenance with `confidence: null`. Do not claim BPM, sections, meter, lyrics, emotion or automatic music understanding. Analysis never overrides approved manual cues.
+- Normalized audio, mixes, analyses and evidence stay under the external project cache/reports. Source audio is immutable. Never commit audio, stems, mixes or generated media.
+- Preview uses the generated PCM mix via Remotion `<Audio>`; final output uses AAC encoding of the same mix. Do not claim sample-identical preview/final playback. Verify actual decoded output, not the presence of an audio stream.
 
 ### Timeline and rendering
 
@@ -79,7 +94,7 @@ Do not treat plans, prior reports or user summaries as proof of the current file
 - Resolve the shot from the raw output frame before applying renderer sampling.
 - Renderer sampling is local to the selected renderer. Use `floor(localFrame * samplingFps / outputFps)`; never quantize before selection.
 - Video/Hybrid media playback is inside a shot-local Sequence; Remotion `trimBefore` is in composition-frame units.
-- Soundtrack timing is authoritative and is never retimed by animation sampling.
+- The approved master duration and integer output-frame clock are authoritative; audio samples map to frames through the documented rounding policy and are never retimed by animation sampling.
 - Do not make one song's duration, scene count, resolution, fps or pixel profile a global constant.
 - Local rendering uses Remotion `renderFrames` plus system FFmpeg in the current environment.
 
@@ -107,6 +122,8 @@ npm run compositions
 npm run seed:examples
 npm run media:seed
 npm run media:verify
+npm run audio:seed
+npm run audio:verify
 npm run render:project -- --project synthetic-pixel-demo --mode video --frames 0-23
 npm run render:project -- --project synthetic-module-pixel-demo --mode video --frames 0-47
 npm run verify:modules
@@ -131,4 +148,4 @@ Agents that do not auto-discover `.agents/skills` must read this file and the fi
 
 ## Scope boundary
 
-The reusable engine supports declarative renderers, trusted project-local Canvas 2D scene modules, and local Video/Hybrid media composition. It does not start a music-video production, generate media with AI, migrate a private production, call providers, implement full audio mixing or publish production scenes. Stop before unauthorized provider, publication or production work.
+The reusable engine supports declarative renderers, trusted project-local Canvas 2D scene modules, local Video/Hybrid media composition, multi-format audio ingestion, frame-locked multitrack mixing and deterministic cue analysis. It does not start a music-video production, generate media with AI, migrate a private production, call providers, implement automatic music understanding or publish production scenes. Stop before unauthorized provider, publication or production work.

@@ -1,11 +1,56 @@
 export type DurationPolicy = 'round' | 'floor' | 'ceil';
+export type AudioFormat = 'wav-pcm' | 'mp3' | 'flac' | 'm4a-aac';
+export type AudioMixSampleRate = 44100 | 48000;
 
 export type AudioConfig = {
   path: string;
   sha256: string;
   durationSeconds: number;
   durationPolicy: DurationPolicy;
-  format: 'wav-pcm';
+  format: AudioFormat;
+  assetId?: string;
+  mixSampleRate: AudioMixSampleRate;
+  gainDb: number;
+  fadeInFrames: number;
+  fadeOutFrames: number;
+  gainAutomation: AudioAutomationPoint[];
+};
+
+export type AudioTrackRole = 'sfx' | 'voiceover' | 'ambience';
+
+export type AudioAutomationPoint = {
+  frame: number;
+  gainDb: number;
+};
+
+export type AudioTrackConfig = {
+  id: string;
+  role: AudioTrackRole;
+  assetId: string;
+  startFrame: number;
+  durationFrames: number;
+  sourceStartSeconds: number;
+  gainDb: number;
+  fadeInFrames: number;
+  fadeOutFrames: number;
+  muted: boolean;
+  gainAutomation: AudioAutomationPoint[];
+};
+
+export type AudioAssetMetadata = {
+  format: AudioFormat;
+  container: string;
+  codec: string;
+  sampleRate: number;
+  channels: number;
+  channelLayout: string | null;
+  probeDurationSeconds: number;
+  decodedDurationSeconds: number;
+  startTimeSeconds: number;
+  encoderDelaySamples: number | null;
+  paddingSamples: number | null;
+  hasUnexpectedStreams: boolean;
+  fileSizeBytes: number;
 };
 
 export type LyricsConfig = {
@@ -203,6 +248,7 @@ export type ProjectConfig = {
   cues: Cue[];
   chapters: Chapter[];
   sceneModules: SceneModuleConfig[];
+  audioTracks: AudioTrackConfig[];
   assets: ProjectAsset[];
   permissions: PermissionsConfig;
   render: RenderConfig;
@@ -249,6 +295,12 @@ export type RenderProjectSnapshot = {
     durationSeconds: number;
     sha256: string;
     durationPolicy: DurationPolicy;
+    format: AudioFormat;
+    mixSampleRate: AudioMixSampleRate;
+    gainDb: number;
+    fadeInFrames: number;
+    fadeOutFrames: number;
+    gainAutomation: AudioAutomationPoint[];
   };
   assets: RenderProjectAsset[];
   mediaAssets: Record<string, VideoAssetMetadata>;
@@ -267,6 +319,7 @@ export type LoadedAsset = ProjectAsset & {
   absolutePath: string | null;
   hashVerified: boolean;
   videoMetadata?: VideoAssetMetadata;
+  audioMetadata?: AudioAssetMetadata;
 };
 
 export type LoadedSceneModule = SceneModuleConfig & {
@@ -286,5 +339,7 @@ export type LoadedProject = {
   shots: ResolvedShot[];
   assets: LoadedAsset[];
   sceneModules: LoadedSceneModule[];
+  audioMetadata?: AudioAssetMetadata;
+  audioTracks: AudioTrackConfig[];
   renderProject: RenderProjectSnapshot;
 };

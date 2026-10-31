@@ -5,7 +5,7 @@
 // Requires: npm run factory:build.
 
 import {execFileSync} from 'node:child_process';
-import {readdirSync, renameSync, statSync, writeFileSync} from 'node:fs';
+import {copyFileSync, readdirSync, renameSync, statSync, writeFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -42,6 +42,8 @@ if (!['video', 'still'].includes(mode)) {
 
 const {loadProject} = require('../dist/src/project/loadProject.js');
 const {stageProjectMedia} = require('../dist/src/media/stagePublic.js');
+const {buildProjectAudioMix, sliceNormalizedMix} = require('../dist/src/audio/mixer.js');
+const {frameToSampleIndex} = require('../dist/src/timeline/audioClock.js');
 // Bundling runs locally through @remotion/bundler inside bundleProject; no remote service is used.
 const {bundleProject} = require('../dist/src/remotion/bundleProject.js');
 const {
@@ -78,10 +80,22 @@ process.env.TEMP = tmpDir;
 process.env.TMPDIR = tmpDir;
 
 const staged = stageProjectMedia(project, {engineRoot: repoRoot, boundary});
+let audioMix = null;
+let audioMixPublicPath = staged.audioPublicPath;
+if (mode === 'video') {
+  audioMix = buildProjectAudioMix(project, {boundary});
+  const mixRelative = `source/audio/${projectId}-mix.wav`;
+  const mixPublic = assertSafePath(boundary, path.join(staged.publicDir, mixRelative), {
+    expect: 'file',
+    subtree: 'cache',
+  });
+  copyFileSync(audioMix.mixPath, mixPublic);
+  audioMixPublicPath = mixRelative;
+}
 const renderProject = {
   ...project.renderProject,
   publicAssets: staged.publicAssets,
-  audioPublicPath: staged.audioPublicPath,
+  audioPublicPath: audioMixPublicPath,
 };
 
 const prepared = await bundleProject(project, {
@@ -185,9 +199,23 @@ try {
       renameSync(path.join(frameDir, name), path.join(sequenceDir, `frame-${String(index).padStart(3, '0')}.png`));
     });
 
-    const audioFile = staged.audioPublicPath
-      ? path.join(staged.publicDir, staged.audioPublicPath)
-      : null;
+    if (!audioMix) throw new Error('Video rendering requires an authoritative audio mix');
+    const segmentSamples =
+      frameToSampleIndex(end + 1, audioMix.mixSampleRate, project.config.output.fps) -
+      frameToSampleIndex(start, audioMix.mixSampleRate, project.config.output.fps);
+    const audioSegment = sliceNormalizedMix(
+      audioMix.mixWavBytes,
+      start,
+      end + 1,
+      audioMix.mixSampleRate,
+      project.config.output.fps,
+    );
+    const audioFile = assertSafePath(
+      boundary,
+      path.join(boundary.cacheRoot, 'audio-mix', `${projectId}-segment-${start}-${end}.wav`),
+      {expect: 'file', subtree: 'cache'},
+    );
+    writeFileSync(audioFile, audioSegment);
     const ffmpegArgs = [
       '-hide_banner',
       '-loglevel',
@@ -221,11 +249,22 @@ try {
       '-r',
       String(project.config.output.fps),
     );
-    if (audioFile) ffmpegArgs.push('-af', 'apad', '-c:a', 'aac', '-b:a', '192k', '-shortest');
+    if (audioFile) ffmpegArgs.push('-c:a', 'aac', '-b:a', '192k');
     ffmpegArgs.push('-movflags', '+faststart', output);
     execFileSync('ffmpeg', ffmpegArgs, {stdio: 'inherit'});
 
-    reportFrames = {frameDir, sequenceDir, rendered: rendered.length, audioFile};
+    reportFrames = {
+      frameDir,
+      sequenceDir,
+      rendered: rendered.length,
+      audioFile,
+      audioSegment: {
+        startFrame: start,
+        endFrameExclusive: end + 1,
+        samples: segmentSamples,
+        sampleRate: audioMix.mixSampleRate,
+      },
+    };
   }
 
   const report = {
@@ -234,7 +273,20 @@ try {
     projectDir: project.projectDir,
     publicDir: staged.publicDir,
     publicAssets: staged.publicAssets,
-    audioPublicPath: staged.audioPublicPath,
+    audioPublicPath: audioMixPublicPath,
+    audioMix: audioMix
+      ? {
+          report: path.relative(project.projectDir, audioMix.reportPath).split(path.sep).join('/'),
+          analysis: path
+            .relative(project.projectDir, audioMix.analysisPath)
+            .split(path.sep)
+            .join('/'),
+          sha256: audioMix.mixSha256,
+          sampleRate: audioMix.mixSampleRate,
+          totalSamples: audioMix.mixSampleCount,
+          durationSeconds: audioMix.mixDurationSeconds,
+        }
+      : null,
     bundle: {
       entryPoint: path.relative(project.projectDir, prepared.entryPoint).split(path.sep).join('/'),
       bundleDir: path.relative(project.projectDir, prepared.bundleDir).split(path.sep).join('/'),

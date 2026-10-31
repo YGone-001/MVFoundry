@@ -19,7 +19,8 @@ Defines how generated media may enter a local project. P0 authorizes no provider
 - A visual identity contract from `visual-identity-continuity`.
 - Project config, asset manifest and local workspace path.
 - For project-local code, an explicitly declared Canvas 2D module with a `scenes/` path, contract version, SHA256, `user-authored-approved` trust, parameter schema and declared asset dependencies. Project scene modules are executable code, not generated media.
-- For Video/Hybrid shots, approved local video/layer assets with SHA256, FFprobe metadata, a shot-local source in-point, fit/scale and an explicit soundtrack-only audio policy.
+- For Video/Hybrid shots, approved local video/layer assets with SHA256, FFprobe metadata, a shot-local source in-point, fit/scale and muted embedded source audio.
+- For generated or supplied voice/music/SFX, an approved project-local `audio-reference` asset with SHA256, source/rights, decoded format/duration and an explicit role (`sfx`, `voiceover` or `ambience`); the master remains the sole music-master declaration.
 - Explicit written authorization: provider, model scope, budget cap, data policy and rights.
 - Approved local references with SHA256.
 - Target output profile: dimensions, fps, duration and codec.
@@ -33,7 +34,7 @@ Defines how generated media may enter a local project. P0 authorizes no provider
 5. Obtain explicit authorization for the exact prompt, references, provider and estimated cost. P0 permits none.
 6. Run generation outside the engine repository. Keep raw output in the project workspace quarantine, never in the engine.
 7. Hash and inspect every revision; record source, model, prompt, seed, rights and approval in the asset manifest.
-8. Integrate only approved assets through the project's renderer adapter; keep a fail-closed path when missing. Generated footage must enter a Video shot only as an approved local `video` asset with verified hash, FFprobe metadata, aligned source in-point and muted source audio. Layered PNGs must be approved `layer` assets with alpha.
+8. Integrate only approved assets through the project's renderer adapter; keep a fail-closed path when missing. Generated footage must enter a Video shot only as an approved local `video` asset with verified hash, FFprobe metadata, aligned source in-point and muted source audio. Layered PNGs must be approved `layer` assets with alpha. Generated voice, music or SFX must enter separately as approved `audio-reference` assets and be declared through the master or `audioTracks`; never unmute embedded provider footage audio or treat it as an implicit soundtrack. Do not run AI transcription, speech recognition or music-understanding services in this phase.
 9. If a shot uses a project-local scene module, confirm the module is user-authored/approved, hash-verified before bundling, confined to the project `scenes/` directory and free of remote imports or network references. Do not confuse hash identity with code safety.
 10. Hand evidence to `music-video-quality-gate`.
 
@@ -52,6 +53,8 @@ Defines how generated media may enter a local project. P0 authorizes no provider
 - Loading project scene modules from a remote URL, npm, GitHub or another project.
 - Treating a matching module hash as proof that executable code is safe.
 - Using remote HTTP URLs as video sources or enabling embedded video audio.
+- Treating generated footage audio or an unapproved file as a soundtrack; generated audio must be an approved `audio-reference` with provenance.
+- Claiming AI music analysis, beat detection, transcription or lyrics from the local onset foundation.
 - Sending unapproved references or performer likeness.
 - Embedding API keys, tokens or private paths in the repository.
 - Silently substituting generated footage for existing art.
@@ -65,6 +68,7 @@ Defines how generated media may enter a local project. P0 authorizes no provider
 - Every used asset is local, hashed, rights-recorded and approved.
 - Every used scene module is explicitly declared, hash-verified, trust-approved and integrated only through the bundle-local renderer contract.
 - Every used video/layer asset is local, approved, hash-verified and validated for the Video/Hybrid renderer; embedded video audio is muted.
+- Every used audio asset is local, approved, hash-verified, decoded-duration verified and declared as the master or an explicit track role; no provider audio bypasses the audio provenance contract.
 - The shot specification is complete and reproducible.
 - Unimplemented AI generation modes fail closed rather than rendering a placeholder as final.
 - The quality gate has reviewed the integration.

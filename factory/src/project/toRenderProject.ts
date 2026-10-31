@@ -65,6 +65,12 @@ export const toRenderProject = (
       durationSeconds: config.audio.durationSeconds,
       sha256: config.audio.sha256,
       durationPolicy: config.audio.durationPolicy,
+      format: config.audio.format,
+      mixSampleRate: config.audio.mixSampleRate,
+      gainDb: config.audio.gainDb,
+      fadeInFrames: config.audio.fadeInFrames,
+      fadeOutFrames: config.audio.fadeOutFrames,
+      gainAutomation: config.audio.gainAutomation.map((point) => ({...point})),
     },
     assets: config.assets.map((asset) => ({
       id: asset.id,

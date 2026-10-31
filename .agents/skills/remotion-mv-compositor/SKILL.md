@@ -1,6 +1,6 @@
 ---
 name: remotion-mv-compositor
-description: Maintain the reusable Remotion composition engine for MVFoundry. Use when adding renderers, resolving frame ownership, changing aspect ratios or frame rates, wiring local media, implementing Video or Hybrid shots, loading approved project-local scene modules, preserving soundtrack timing, or keeping legacy compositions working.
+description: Maintain the reusable Remotion composition engine for MVFoundry. Use when adding renderers, resolving frame ownership, changing aspect ratios or frame rates, wiring local media, implementing Video or Hybrid shots, loading approved project-local scene modules, ingesting or mixing audio, preserving soundtrack timing, or keeping legacy compositions working.
 ---
 
 # Remotion MV Compositor
@@ -9,9 +9,9 @@ Owns the generic frame-to-pixels engine in `factory/`. Song-specific scenes and 
 
 ## Activation conditions
 
-- A change touches the frame clock, timeline resolver, composition metadata, scene registry, renderer adapters, module loader, staged entry or render script.
-- A new renderer, project profile, Video/Hybrid media shot or project-local Canvas 2D module must be supported without editing the global clock.
-- A render must be verified for dimensions, fps, frames, color or audio.
+- A change touches the frame clock, timeline resolver, composition metadata, scene registry, renderer adapters, module loader, audio mixer, staged entry or render script.
+- A new renderer, project profile, Video/Hybrid media shot, audio format, track role or project-local Canvas 2D module must be supported without editing the global clock.
+- A render must be verified for dimensions, fps, frames, color or decoded audio.
 - Do not activate for story direction or provider contract work.
 
 ## Input contract
@@ -20,7 +20,9 @@ Owns the generic frame-to-pixels engine in `factory/`. Song-specific scenes and 
 - `MV_WORKSPACE_ROOT` containing the project, audio and approved assets.
 - A registered renderer kind from `factory/src/scenes/registry.ts`, or a declared `project:<id>` module.
 - For modules: a `sceneModules` entry with project-relative `scenes/` path, contract version, type, SHA256, `user-authored-approved` trust, canvas and sampling declarations.
-- For Video/Hybrid shots: approved local video/layer assets, SHA256, FFprobe metadata, output-frame-aligned source in-points, fit/scale/layer/overlay declarations, and an only-soundtrack audio policy.
+- For Video/Hybrid shots: approved local video/layer assets, SHA256, FFprobe metadata, output-frame-aligned source in-points, fit/scale/layer/overlay declarations, and a muted-embedded-audio policy.
+- For audio: a master `audio` declaration (`wav-pcm`, `mp3`, `flac` or `m4a-aac`), optional approved `audio-reference` assets, optional `audioTracks` with roles `sfx`/`voiceover`/`ambience`, frame ranges, source in-points, gain, fades and bounded automation, and a mix sample rate of 44.1 or 48 kHz.
+- FFmpeg/FFprobe availability for non-WAV probing, normalization and muxing.
 - Frame-domain chapters and shots using half-open ranges.
 - Target output profile and render settings.
 - For legacy work, the untouched `src/index.ts`, `src/debug/index.ts`, scenes and production data.
@@ -40,7 +42,7 @@ Owns the generic frame-to-pixels engine in `factory/`. Song-specific scenes and 
 11. Route all render output, staging, cache recreation and report writes through `factory/src/workspace/writeBoundary.ts`. The generated entry, module copies and bundle output stay in the external project cache.
 12. Keep default output under `<project>/renders`. Allow only a single filename relative to renders or an absolute direct child of renders for `--out`; reject traversal, other projects, engine paths and linked destinations before writing.
 13. Restrict destructive cleanup to strict descendants of `<project>/cache`; never delete the cache root, project root, source audio, approved assets or declared module sources.
-14. Preserve soundtrack timing. P0 stages and muxes the approved audio unchanged.
+14. Preserve the master duration/frame clock. Do not retime visuals or audio. Build the authoritative audio mix described below; never mux the raw master and a separate Remotion audio path as competing final authorities.
 15. Render lossless frames and encode deterministically; verify actual output with ffprobe.
 16. Keep the legacy compositions registered and do not rewrite S01-S10 during engine work.
 17. Add or update frame-boundary, write-boundary, sampling-isolation, module hash/trust/link and runtime-binding tests before replacing routing logic.
@@ -50,6 +52,14 @@ Owns the generic frame-to-pixels engine in `factory/`. Song-specific scenes and 
 21. Implement Video/Hybrid as media renderers, not Canvas renderers. Use a shot-local `Sequence` and `OffthreadVideo` with composition-frame `trimBefore`; keep embedded video audio muted and preserve the global soundtrack.
 22. Compose Hybrid layers in explicit order: fallback background, video, sorted transparent PNG layers, deterministic Canvas overlay. Validate asset kinds, unique orders, opacity, fit, position/scale and shot-local visibility.
 23. Run `media:seed` and `media:verify` for real synthetic Video/Hybrid stills, videos, decoded source-color checks, layer/overlay evidence, FFprobe metadata, audio muting analysis and source-hash preservation. Report skipped media/video checks as NOT RUN.
+24. Keep `audio` as the sole master and duration authority. Supplemental `audioTracks` may be SFX, voiceover or ambience; do not add a second music master or competing soundtrack declaration.
+25. Probe actual audio content, not extensions. WAV uses the PCM header; MP3/FLAC/AAC-in-M4A use FFprobe plus an FFmpeg decode-duration pass. Reject unsupported codecs, ambiguous containers, multichannel sources and unexpected streams. Verify master/track hashes, approvals and decoded source ranges.
+26. Normalize every active source to stereo signed 16-bit PCM at the project mix rate with local FFmpeg. Normalized files, the mix and segments stay under `<project>/cache/audio-normalized` and `<project>/cache/audio-mix`.
+27. Map only through the integer frame clock: `Math.round(frame * sampleRate / outputFps)`, half-open ranges, mix samples `Math.round(durationInFrames * sampleRate / outputFps)`. Support non-integer ratios and slice nonzero render subranges from the corresponding global interval.
+28. Apply source in-point, gain, linear frame-derived fades and bounded linear dB automation; sum overlapping tracks. Use one documented global limiter gain to 0.999 only when the summed peak exceeds it, and report peak before/after and clipping diagnostics. Do not normalize the whole song or hide clipping.
+29. Write one project-local PCM mix and mux exactly one AAC stream from it (or its frame-range segment). Preview `<Audio>` must reference the same mix. Embedded video audio stays muted. Never claim sample-identical preview/final output.
+30. Generate deterministic RMS/peak/onset analysis with source hash, version, parameters, frame, metric, `estimated` provenance and `confidence: null`. Do not claim BPM, sections, lyrics or automatic music understanding; never overwrite manual cues.
+31. Add/update tests for format probing, decoded duration, track validation, frame/sample mapping, gain/fades/automation/limiter, subrange alignment, analysis and evidence. Run `audio:seed` and `audio:verify` and analyze decoded output; an AAC stream alone is not evidence. Report skipped audio checks as NOT RUN.
 
 ## Output contract
 
@@ -58,8 +68,10 @@ Owns the generic frame-to-pixels engine in `factory/`. Song-specific scenes and 
 - Frame-boundary and sampling evidence, including module hold pairs at non-integer output-to-sampling ratios.
 - ffprobe output for codec, dimensions, fps, frames, color and audio.
 - Module evidence showing declared hashes, staged entry location, module ownership per frame and project isolation.
-- Media evidence showing probed source metadata, decoded source colors at in-points/cuts, PNG layer alpha/visibility, Canvas overlay motion, one soundtrack stream and embedded video audio muted.
-- A note distinguishing implemented renderers from unsupported source profiles or unimplemented audio mixing.
+- Media evidence showing probed source metadata, decoded source colors at in-points/cuts, PNG layer alpha/visibility, Canvas overlay motion, one audio stream and embedded video audio muted.
+- Audio evidence showing format/duration probes, source hashes, track sample ranges, gain/ducking/fade measurements, silence outside intervals, nonzero subrange timing, one AAC stream and bounded duration discrepancy.
+- Mix/analysis reports under the external project.
+- A note distinguishing implemented renderers and audio capabilities from unsupported source profiles or unimplemented music understanding.
 
 ## Prohibited actions
 
@@ -70,6 +82,10 @@ Owns the generic frame-to-pixels engine in `factory/`. Song-specific scenes and 
 - Using `eval`, dynamic unverified strings, arbitrary `require()` or a global mutable module registry.
 - Copying project scene source or media into the engine repository.
 - Using unrestricted HTTP URLs as video sources or unmuting embedded video audio.
+- Accepting FFmpeg filtergraphs, shell strings or arbitrary commands from project configuration.
+- Muxing the raw master plus a separate preview/embedded audio stream as competing final authorities.
+- Claiming BPM, song sections, lyrics, emotion, automatic ducking or music understanding from the onset detector.
+- Claiming sample-identical preview and final audio, or marking an AAC stream as proof of correct mixing.
 - Forcing Video/Hybrid through the Canvas 2D renderer interface.
 - Claiming a hash makes executable code safe, or claiming a sandbox that does not exist.
 - Public HTTP exposure of private media.
@@ -88,7 +104,11 @@ Owns the generic frame-to-pixels engine in `factory/`. Song-specific scenes and 
 - Built-in renderer IDs remain available and module IDs cannot silently replace them.
 - Video/Hybrid sources are approved, hash-verified, FFprobe-validated and mapped with shot-local source in-points; VFR/rotated/too-short sources fail closed.
 - Hybrid video, transparent PNG layers and Canvas overlay are all visible in actual output in the declared order.
-- Embedded video audio is muted and exactly the soundtrack remains.
+- Embedded video audio is muted and exactly one AAC stream from the authoritative mix remains.
+- Audio frame/sample mapping, nonzero subrange alignment and track source bounds are verified with decoded output.
+- Gain, fades, explicit automation and manual ducking are measured, and silence outside track ranges is confirmed.
+- Source audio hashes are unchanged; normalized/mix/analysis artifacts remain outside Git.
+- Analysis events are frame-aligned, explicitly estimated and do not replace manual cues.
 - Local assets resolve only from the approved manifest/staging.
 - Every engine-authored project write path passes the central boundary; no ad-hoc output or cleanup path exists. The trusted bundler writes its own tree into a pre-validated, freshly created cache directory. Generated entry, bundle and module copies stay in the external project cache.
 - Unsafe `--out` values fail before any output file or staging write.
@@ -108,5 +128,7 @@ Owns the generic frame-to-pixels engine in `factory/`. Song-specific scenes and 
 - Unsupported, corrupt, VFR/rotated, too-short or unstaged video source: fail before rendering or at media readiness; never emit a silent black frame.
 - Invalid Hybrid layer asset/order/opacity/visibility/overlay: fail before drawing; never degrade to a different composition.
 - Embedded video audio enabled or extra audio stream: fail the audio policy check.
+- Unsupported, ambiguous, multichannel or hash-mismatched audio, or a track exceeding its source/project range: fail before mixing.
+- Missing FFmpeg/FFprobe for a required non-WAV decode or mux: fail with an actionable error; never mux a fallback stream.
 - Unsafe output or cleanup path: fail before writing; do not fall back to a default or a repository path.
 - Render tool failure or unavailable browser/FFmpeg/FFprobe: report NOT RUN with the exact command and error; never claim success.

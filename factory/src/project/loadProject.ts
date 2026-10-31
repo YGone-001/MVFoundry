@@ -5,7 +5,7 @@ import {durationFramesFromSeconds} from '../config/duration';
 import type {LoadedAsset, LoadedProject, ProjectConfig} from '../config/types';
 import {validateProjectConfig} from '../config/validate';
 import {sha256File} from '../media/hash';
-import {readWavMetadata} from '../media/wav';
+import {probeAudio} from '../media/audioProbe';
 import {probeVideo} from '../media/videoProbe';
 import {probeLayerPng} from '../media/pngProbe';
 import {assertMediaTimelines} from '../media/mediaTimeline';
@@ -79,13 +79,19 @@ export const loadProject = (
       `Audio SHA256 mismatch for ${config.audio.path}: expected ${config.audio.sha256}, received ${audioHash}`,
     );
   }
-  if (config.audio.format === 'wav-pcm') {
-    const wav = readWavMetadata(audioPath);
-    if (Math.abs(wav.durationSeconds - config.audio.durationSeconds) > 0.02) {
-      throw new MediaError(
-        `Audio duration mismatch: config ${config.audio.durationSeconds}s, WAV ${wav.durationSeconds}s`,
-      );
-    }
+  const audioMetadata = probeAudio(
+    audioPath,
+    config.audio.assetId ?? 'master',
+    config.audio.format,
+  );
+  const durationTolerance =
+    config.audio.format === 'wav-pcm'
+      ? 0.02
+      : Math.max(0.05, 1 / config.output.fps);
+  if (Math.abs(audioMetadata.decodedDurationSeconds - config.audio.durationSeconds) > durationTolerance) {
+    throw new MediaError(
+      `Audio duration mismatch: config ${config.audio.durationSeconds}s, ${config.audio.format} decoded ${audioMetadata.decodedDurationSeconds}s`,
+    );
   }
   const durationInFrames = durationFramesFromSeconds(
     config.audio.durationSeconds,
@@ -118,12 +124,37 @@ export const loadProject = (
     if (asset.kind === 'layer') {
       probeLayerPng(absolutePath, asset.id);
     }
+    if (asset.kind === 'audio-reference') {
+      loaded.audioMetadata =
+        asset.id === config.audio.assetId && absolutePath === audioPath
+          ? audioMetadata
+          : probeAudio(absolutePath, asset.id);
+    }
     return loaded;
   });
 
   const shots = resolveShots(config.chapters);
   assertShotCoverage(shots, durationInFrames);
   assertMediaTimelines(config, assets, config.output.fps);
+  const sampleTolerance = 1 / config.audio.mixSampleRate + 1e-9;
+  for (const track of config.audioTracks) {
+    const asset = assets.find((candidate) => candidate.id === track.assetId);
+    const metadata = asset?.audioMetadata;
+    if (!asset || !asset.absolutePath || !metadata) {
+      throw new MediaError(
+        `Audio track ${track.id} references unavailable asset ${track.assetId}`,
+      );
+    }
+    const sourceEnd = track.sourceStartSeconds + track.durationFrames / config.output.fps;
+    if (
+      track.sourceStartSeconds >= metadata.decodedDurationSeconds ||
+      sourceEnd > metadata.decodedDurationSeconds + sampleTolerance
+    ) {
+      throw new MediaError(
+        `Audio track ${track.id} range ${track.sourceStartSeconds}s-${sourceEnd}s exceeds the decoded source duration ${metadata.decodedDurationSeconds}s`,
+      );
+    }
+  }
 
   const videoMetadata = Object.fromEntries(
     assets
@@ -141,6 +172,8 @@ export const loadProject = (
     shots,
     assets,
     sceneModules,
+    audioMetadata,
+    audioTracks: config.audioTracks,
     renderProject: toRenderProject(config, durationInFrames, videoMetadata),
   };
 };

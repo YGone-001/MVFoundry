@@ -4,6 +4,11 @@ import {parseSceneModules} from './sceneModules';
 import {PROJECT_SCENE_RENDERER_PREFIX} from '../scenes/external/constants';
 import type {
   AssetApproval,
+  AudioAutomationPoint,
+  AudioConfig,
+  AudioFormat,
+  AudioTrackConfig,
+  AudioTrackRole,
   Chapter,
   Cue,
   CueSource,
@@ -28,6 +33,8 @@ const NARRATIVE_MODES: readonly NarrativeMode[] = ['narrative', 'abstract', 'lyr
 const CUE_SOURCES: readonly CueSource[] = ['measured', 'estimated', 'synthetic'];
 const ASSET_KINDS: readonly ProjectAssetKind[] = ['image', 'video', 'layer', 'audio-reference'];
 const APPROVALS: readonly AssetApproval[] = ['approved', 'pending', 'rejected', 'not_present'];
+const AUDIO_FORMATS: readonly AudioFormat[] = ['wav-pcm', 'mp3', 'flac', 'm4a-aac'];
+const AUDIO_ROLES: readonly AudioTrackRole[] = ['sfx', 'voiceover', 'ambience'];
 const MEDIA_FITS: readonly MediaFit[] = ['contain', 'cover'];
 const MEDIA_RENDERERS = new Set(['video', 'hybrid']);
 const PROJECT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{2,63}$/;
@@ -255,7 +262,7 @@ const validateVideoSource = (
     `${field}.endBehavior`,
   );
   const muted = source.muted === undefined ? true : boolean(source.muted, `${field}.muted`);
-  if (!muted) fail(`${field}.muted must be true; the soundtrack is the only authorized audio`);
+  if (!muted) fail(`${field}.muted must be true; the project audio mix is the only final audio authority`);
   const positionX = optionalNumber(source.positionX, `${field}.positionX`, 0);
   const positionY = optionalNumber(source.positionY, `${field}.positionY`, 0);
   const scale = optionalNumber(source.scale, `${field}.scale`, 1);
@@ -374,6 +381,112 @@ const validateMedia = (
   return {kind: 'hybrid', video, layers, overlay} satisfies ShotHybridMedia;
 };
 
+const validateAudioAutomation = (
+  value: unknown,
+  field: string,
+  trackDurationFrames: number,
+): AudioAutomationPoint[] => {
+  if (value === undefined) return [];
+  const raw = array(value, field);
+  if (raw.length > 32) fail(`${field} must contain at most 32 points`);
+  const points: AudioAutomationPoint[] = [];
+  let previousFrame = -1;
+  for (const [index, entry] of raw.entries()) {
+    const point = record(entry, `${field}[${index}]`);
+    assertKeys(point, ['frame', 'gainDb'], `${field}[${index}]`);
+    const frame = integer(point.frame, `${field}[${index}].frame`, 0);
+    if (frame > trackDurationFrames) {
+      fail(`${field}[${index}].frame exceeds the allowed duration ${trackDurationFrames}`);
+    }
+    if (frame <= previousFrame) fail(`${field} must have strictly increasing frames`);
+    previousFrame = frame;
+    const gainDb = number(point.gainDb, `${field}[${index}].gainDb`);
+    if (gainDb < -60 || gainDb > 12) fail(`${field}[${index}].gainDb must be in [-60, 12]`);
+    points.push({frame, gainDb});
+  }
+  return points;
+};
+
+const validateAudioTracks = (
+  value: unknown,
+  field: string,
+  assetById: ReadonlyMap<string, ProjectAsset>,
+  fps: number,
+  durationInFrames: number,
+): AudioTrackConfig[] => {
+  if (value === undefined) return [];
+  const raw = array(value, field);
+  if (raw.length > 32) fail(`${field} must contain at most 32 tracks`);
+  const seen = new Set<string>();
+  const tracks: AudioTrackConfig[] = [];
+  for (const [index, entry] of raw.entries()) {
+    const trackField = `${field}[${index}]`;
+    const track = record(entry, trackField);
+    assertKeys(
+      track,
+      [
+        'id',
+        'role',
+        'assetId',
+        'startFrame',
+        'durationFrames',
+        'sourceStartSeconds',
+        'gainDb',
+        'fadeInFrames',
+        'fadeOutFrames',
+        'muted',
+        'gainAutomation',
+      ],
+      trackField,
+    );
+    const id = text(track.id, `${trackField}.id`);
+    if (!PROJECT_ID_PATTERN.test(id)) fail(`${trackField}.id must be lowercase letters, digits and hyphens (3-64 chars)`);
+    if (seen.has(id)) fail(`${field} contains duplicate id ${id}`);
+    seen.add(id);
+    const role = oneOf(track.role, AUDIO_ROLES, `${trackField}.role`);
+    const assetId = text(track.assetId, `${trackField}.assetId`);
+    assertApprovedAssetKind(assetById, assetId, 'audio-reference', `${trackField}.assetId`);
+    const startFrame = integer(track.startFrame, `${trackField}.startFrame`);
+    const durationFrames = integer(track.durationFrames, `${trackField}.durationFrames`, 1);
+    if (startFrame + durationFrames > durationInFrames) {
+      fail(`${trackField} exceeds the project duration ${durationInFrames}`);
+    }
+    const sourceStartSeconds = number(track.sourceStartSeconds, `${trackField}.sourceStartSeconds`);
+    if (sourceStartSeconds < 0) fail(`${trackField}.sourceStartSeconds must be non-negative`);
+    const aligned = sourceStartSeconds * fps;
+    if (Math.abs(aligned - Math.round(aligned)) > 1e-6) {
+      fail(`${trackField}.sourceStartSeconds must align to an output-frame boundary at ${fps}fps`);
+    }
+    const gainDb = number(track.gainDb, `${trackField}.gainDb`);
+    if (gainDb < -60 || gainDb > 12) fail(`${trackField}.gainDb must be in [-60, 12]`);
+    const fadeInFrames = integer(track.fadeInFrames, `${trackField}.fadeInFrames`, 0);
+    const fadeOutFrames = integer(track.fadeOutFrames, `${trackField}.fadeOutFrames`, 0);
+    if (fadeInFrames + fadeOutFrames > durationFrames) {
+      fail(`${trackField} fades exceed the track duration`);
+    }
+    const muted = track.muted === undefined ? false : boolean(track.muted, `${trackField}.muted`);
+    const gainAutomation = validateAudioAutomation(
+      track.gainAutomation,
+      `${trackField}.gainAutomation`,
+      durationFrames,
+    );
+    tracks.push({
+      id,
+      role,
+      assetId,
+      startFrame,
+      durationFrames,
+      sourceStartSeconds,
+      gainDb,
+      fadeInFrames,
+      fadeOutFrames,
+      muted,
+      gainAutomation,
+    });
+  }
+  return tracks;
+};
+
 const validateShot = (
   value: unknown,
   field: string,
@@ -490,15 +603,45 @@ export const validateProjectConfig = (
   const permissions = record(config.permissions, 'permissions');
   const render = record(config.render, 'render');
 
-  const audioConfig = {
+  assertKeys(
+    audio,
+    [
+      'path',
+      'sha256',
+      'durationSeconds',
+      'durationPolicy',
+      'format',
+      'assetId',
+      'mixSampleRate',
+      'gainDb',
+      'fadeInFrames',
+      'fadeOutFrames',
+      'gainAutomation',
+    ],
+    'audio',
+  );
+  const audioConfig: AudioConfig = {
     path: relativePath(audio.path, 'audio.path'),
     sha256: text(audio.sha256, 'audio.sha256'),
     durationSeconds: number(audio.durationSeconds, 'audio.durationSeconds'),
     durationPolicy: oneOf(audio.durationPolicy, DURATION_POLICIES, 'audio.durationPolicy'),
-    format: oneOf(audio.format, ['wav-pcm'] as const, 'audio.format'),
+    format: oneOf(audio.format, AUDIO_FORMATS, 'audio.format'),
+    assetId: optionalText(audio.assetId, 'audio.assetId'),
+    mixSampleRate: (audio.mixSampleRate === undefined
+      ? 48000
+      : audio.mixSampleRate === 44100 || audio.mixSampleRate === 48000
+        ? audio.mixSampleRate
+        : fail('audio.mixSampleRate must be 44100 or 48000')),
+    gainDb: audio.gainDb === undefined ? 0 : number(audio.gainDb, 'audio.gainDb'),
+    fadeInFrames:
+      audio.fadeInFrames === undefined ? 0 : integer(audio.fadeInFrames, 'audio.fadeInFrames', 0),
+    fadeOutFrames:
+      audio.fadeOutFrames === undefined ? 0 : integer(audio.fadeOutFrames, 'audio.fadeOutFrames', 0),
+    gainAutomation: [],
   };
   if (audioConfig.durationSeconds <= 0) fail('audio.durationSeconds must be positive');
   if (!SHA256_PATTERN.test(audioConfig.sha256)) fail('audio.sha256 must be lowercase hex');
+  if (audioConfig.gainDb < -60 || audioConfig.gainDb > 12) fail('audio.gainDb must be in [-60, 12]');
 
   const width = integer(output.width, 'output.width', 1);
   const height = integer(output.height, 'output.height', 1);
@@ -517,6 +660,14 @@ export const validateProjectConfig = (
       );
     }
   }
+  if (audioConfig.fadeInFrames + audioConfig.fadeOutFrames > derivedDuration) {
+    fail('audio master fades exceed the project duration');
+  }
+  audioConfig.gainAutomation = validateAudioAutomation(
+    audio.gainAutomation,
+    'audio.gainAutomation',
+    derivedDuration,
+  );
 
   const sceneModules = parseSceneModules(config.sceneModules);
   const moduleRendererKinds = new Set(
@@ -536,6 +687,23 @@ export const validateProjectConfig = (
   const assets = rawAssets.map(validateAsset);
   uniqueIds(assets, 'assets');
   const assetById = new Map(assets.map((asset) => [asset.id, asset]));
+  if (audioConfig.assetId) {
+    const masterAsset = assetById.get(audioConfig.assetId);
+    if (!masterAsset) fail(`audio.assetId references unknown asset ${audioConfig.assetId}`);
+    if (masterAsset.approval !== 'approved') {
+      fail(`audio.assetId references asset ${audioConfig.assetId} with approval ${masterAsset.approval}`);
+    }
+    if (masterAsset.kind !== 'audio-reference') {
+      fail(`audio.assetId must reference an audio-reference asset`);
+    }
+    const normalized = (value: string): string => value.replace(/\\/g, '/');
+    if (
+      normalized(masterAsset.path) !== normalized(audioConfig.path) ||
+      masterAsset.sha256 !== audioConfig.sha256
+    ) {
+      fail('audio.assetId path and hash must match the master audio declaration');
+    }
+  }
 
   const chaptersRaw = array(config.chapters, 'chapters');
   if (chaptersRaw.length === 0) fail('chapters must not be empty');
@@ -562,6 +730,14 @@ export const validateProjectConfig = (
   for (let index = 1; index < cues.length; index++) {
     if (cues[index].frame < cues[index - 1].frame) fail('cues must be sorted by frame');
   }
+
+  const audioTracks = validateAudioTracks(
+    config.audioTracks,
+    'audioTracks',
+    assetById,
+    fps,
+    derivedDuration,
+  );
 
   const rendererKinds = protectedRendererKinds;
   const isAllowedRenderer = (kind: string): boolean =>
@@ -661,6 +837,7 @@ export const validateProjectConfig = (
     cues,
     chapters,
     sceneModules,
+    audioTracks,
     assets,
     permissions: permissionsConfig,
     render: renderConfig,

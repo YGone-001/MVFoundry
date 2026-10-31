@@ -22,7 +22,11 @@ It does not include any song, recording, lyrics, reference image, production sce
 
 - Project loading from `MV_WORKSPACE_ROOT` with schema and coverage validation.
 - Canonical path checks: no repository fallback, traversal, absolute manifest paths, junction/symlink escapes or workspace overlap.
-- Audio metadata for 16-bit PCM WAV, SHA256 and duration verification, and an explicit `round|floor|ceil` frame policy.
+- Audio ingestion for PCM WAV, MP3, FLAC and AAC-in-M4A, identified by decoded content rather than filename extension.
+- SHA256, decoded-duration and FFprobe/FFmpeg validation, including source delay and encoder-padding metadata, with the existing `round|floor|ceil` frame policy preserved.
+- An authoritative sample-domain audio mix: master gain/fades/automation plus approved SFX, voiceover and ambience tracks, normalized to 44.1/48 kHz stereo PCM and encoded to AAC exactly once at mux time.
+- Frame-locked audio placement and frame-range audio slicing, including nonzero render subranges and non-integer frame/sample ratios.
+- Deterministic offline peak/RMS/onset cue analysis with explicit estimated provenance; it does not claim tempo, sections, lyrics or automatic music understanding.
 - Half-open integer frame ranges, binary-search shot resolution, and sampling after selection.
 - Renderers:
   - `pixel-canvas` — configurable internal resolution, nearest-neighbour display, hold-based sampling.
@@ -34,17 +38,19 @@ It does not include any song, recording, lyrics, reference image, production sce
 - Local FFprobe validation of approved video metadata and PNG layer alpha metadata before rendering.
 - Per-project staged Remotion entries and local bundles that never copy project scene source into this repository.
 - Local rendering with Remotion `renderFrames` plus system FFmpeg.
-- Four seeded synthetic example projects plus two synthetic media-project templates, engine tests and publication audits.
+- An offline cue report that never overwrites manually approved cue points.
+- Four seeded synthetic example projects, two synthetic media-project templates and three synthetic audio-project templates, engine tests and publication audits.
 
 ## 3. Architecture overview
 
 ```
 external workspace/project.json + scenes/ + approved media
-  -> workspace guard -> config and scene-module validator -> loader (hashes, duration, FFprobe/PNG probes)
+  -> workspace guard -> config and scene-module validator -> loader (hashes, duration, FFprobe/PNG/audio probes)
   -> RenderProjectSnapshot
   -> hash-verified module copies -> staged project entry under <project>/cache
+  -> audio: approved sources -> decode/normalize -> frame-aligned tracks -> one project-local PCM mix
   -> local Remotion bundle -> MV-Factory -> frame-domain resolver -> scene registry
-  -> canvas or media renderer -> renderFrames -> system FFmpeg
+  -> canvas or media renderer -> renderFrames -> system FFmpeg + the one PCM mix
   -> external project renders/
 ```
 
@@ -55,7 +61,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) and [docs/project-config.md](docs/project
 - Node.js 20 or newer.
 - npm with the committed lockfile.
 - Google Chrome/Chromium, or `REMOTION_BROWSER_EXECUTABLE`/`CHROME_PATH` pointing to a browser. If unset, Remotion can manage its own headless browser.
-- System FFmpeg and FFprobe on `PATH` for video asset validation, synthetic media fixture generation and video encoding. Base WAV/PNG fixtures are generated with pure Node; media-project fixtures require FFmpeg.
+- System FFmpeg and FFprobe on `PATH` for non-WAV audio ingestion, audio normalization and mixing, video asset validation, synthetic fixture generation and video encoding. Base WAV/PNG fixtures are generated with pure Node; media and multi-format audio fixtures require FFmpeg.
 - Windows 10/11 x64. The engine and CI are currently maintained for Windows only.
 
 ## 5. Installation
@@ -81,24 +87,26 @@ npm run typecheck
 npm test
 ```
 
-`npm test` regenerates synthetic fixtures, compiles the engine and runs the test suite. Tests never require a private song or production asset. Media probe tests create disposable synthetic MP4 files with FFmpeg and are skipped when FFmpeg/FFprobe is unavailable; the core suite does not require FFmpeg.
+`npm test` regenerates synthetic fixtures, compiles the engine and runs the test suite. Tests never require a private song or production asset. Media and multi-format audio probe tests create disposable synthetic files with FFmpeg and are skipped when FFmpeg/FFprobe are unavailable; the core WAV/PNG suite does not require FFmpeg.
 
-`npm run verify:modules` additionally requires a seeded external workspace and a usable browser; it bundles both module projects and renders real still evidence. `npm run media:seed` creates the Video/Hybrid synthetic projects in a disposable external workspace, and `npm run media:verify` renders their stills and complete short videos with FFprobe/audio checks. CI provisions a pinned, checksum-verified Windows FFmpeg/FFprobe build under the runner temp directory when available; if provisioning or the media/video portion cannot run, the workflow reports NOT RUN rather than claiming media acceptance. See `.github/workflows/engine-ci.yml`. The dependency advisory review is in [docs/dependency-security.md](docs/dependency-security.md).
+`npm run verify:modules` additionally requires a seeded external workspace and a usable browser; it bundles both module projects and renders real still evidence. `npm run media:seed` creates the Video/Hybrid synthetic projects in a disposable external workspace, and `npm run media:verify` renders their stills and complete short videos with FFprobe/audio checks. `npm run audio:seed` creates the three synthetic audio projects (MP3 master, FLAC + SFX/voice/AAC multitrack, and 44.1 kHz click/cue boundaries), and `npm run audio:verify` renders them and analyzes decoded output audio. CI provisions a pinned, checksum-verified Windows FFmpeg/FFprobe build under the runner temp directory, verifies the required `libx264`, `libmp3lame`, `aac` and `flac` encoders, and then runs media and audio acceptance unconditionally; provisioning or encoder failure fails the job rather than skipping acceptance. See `.github/workflows/engine-ci.yml`. The dependency advisory review is in [docs/dependency-security.md](docs/dependency-security.md).
 
 ## 7. Creating a synthetic local project
 
-The engine ships four seeded synthetic profiles: two declarative projects and two project-local scene-module projects. It also ships two media-project templates for Video and Hybrid renderer acceptance.
+The engine ships four seeded synthetic profiles: two declarative projects and two project-local scene-module projects. It also ships two media-project templates for Video and Hybrid renderer acceptance and three audio-project templates for format, mixing and cue acceptance.
 
 ```bash
 export MV_WORKSPACE_ROOT=/absolute/path/outside/this/repository
 npm run seed:examples
 npm run media:seed
 npm run media:verify
+npm run audio:seed
+npm run audio:verify
 ```
 
 On PowerShell: `$env:MV_WORKSPACE_ROOT = 'C:\absolute\path\outside\this\repository'`.
 
-`seed:examples` creates the declarative/module projects. `media:seed` generates the Video/Hybrid projects, including synthetic H.264 source videos with embedded audio, a transparent PNG layer and synthetic soundtracks. All generated media remains in the external workspace and is not committed.
+`seed:examples` creates the declarative/module projects. `media:seed` generates the Video/Hybrid projects, including synthetic H.264 source videos with embedded audio, a transparent PNG layer and synthetic soundtracks. `audio:seed` generates synthetic MP3/FLAC/M4A/WAV sources, a referenced PCM master and a 44.1 kHz click track. All generated media remains in the external workspace and is not committed.
 
 ## 8. Configuring MV_WORKSPACE_ROOT
 
@@ -126,7 +134,12 @@ npm run media:seed
 npm run media:verify
 npm run render:project -- --project synthetic-video-demo --mode video --frames 0-47
 npm run render:project -- --project synthetic-hybrid-demo --mode video --frames 0-44
+npm run render:project -- --project synthetic-audio-mp3-demo --mode video --frames 0-47
+npm run render:project -- --project synthetic-audio-multitrack-demo --mode video --frames 0-59
+npm run render:project -- --project synthetic-audio-boundaries-demo --mode video --frames 24-40
 npm run verify:modules
+npm run audio:seed
+npm run audio:verify
 ```
 
 Set `REMOTION_BROWSER_EXECUTABLE` or `CHROME_PATH` if Remotion cannot locate a browser. The render script writes frames, caches, reports and outputs only inside the external project's `cache/` and `renders/` directories.
@@ -141,7 +154,8 @@ Set `REMOTION_BROWSER_EXECUTABLE` or `CHROME_PATH` if Remotion cannot locate a b
 - Declared scene modules must stay under `scenes/`, be link-free and hash-verified before staging; unapproved, duplicate or cross-project modules fail closed.
 - Approved video assets are project-relative, SHA256-verified and FFprobe-validated before rendering; layer assets must be 8-bit RGBA/grayscale-alpha PNGs.
 - Video sources are local files only; unrestricted HTTP URLs and cross-project asset references are rejected.
-- Embedded video audio is muted; the project soundtrack is the only authorized audio output.
+- Embedded video audio is muted; the single authoritative project mix is the only audio output.
+- Audio sources must be approved `audio-reference` assets with project-relative paths, hashes, source labels and rights records. The master `audio.assetId`, when present, must match the master path and hash.
 - Only approved, hash-verified assets and trusted modules are staged.
 - All engine-authored render, staging, cache and module-bundle writes go through a central write boundary tied to the canonical project root. The trusted Remotion/Webpack bundler writes its generated tree into a pre-validated empty cache directory.
 - Explicit output overrides are limited to direct children of the project `renders/` directory.
@@ -188,7 +202,7 @@ Requirements and behavior:
 - Source FPS may differ from output FPS. Variable-frame-rate and rotated sources are rejected; preprocess them first.
 - `endBehavior` is currently `reject`: a source that ends before the shot fails validation/render.
 - `fit` is `contain` or `cover`; optional `positionX`, `positionY` and `scale` are applied deterministically.
-- Embedded video audio is always muted. The project soundtrack is the only audio output.
+- Embedded video audio is always muted. The project's authoritative audio mix (master plus approved tracks) is the only audio output.
 
 ### Hybrid renderer
 
@@ -222,7 +236,105 @@ The templates are under `factory/examples/media-projects/`. `npm run media:seed`
 
 Video/Hybrid project media is never committed. FFmpeg/FFprobe are required for media fixture generation, probing and video encoding. This is local media composition only; no AI generation provider is integrated.
 
-## 13. Project-local scene modules
+## 13. Audio engine
+
+### Supported formats and master authority
+
+The master soundtrack supports:
+
+| Declared `audio.format` | Content required | Notes |
+|---|---|---|
+| `wav-pcm` | RIFF/WAVE, 16-bit PCM, mono or stereo | Pure Node metadata path; existing projects remain valid |
+| `mp3` | MPEG audio, MP3 codec | Decoded with FFmpeg, including gapless/encoder-delay handling |
+| `flac` | FLAC stream | Lossless decode |
+| `m4a-aac` | MP4/M4A container, AAC audio, exactly one audio stream | AAC priming is handled by the decoder; no video/other streams |
+
+The loader detects the actual container/codec; a filename extension is never trusted. `audio` remains the master soundtrack and the authoritative project duration/timeline input. `audio.assetId` is optional for backward compatibility; when present it must reference an approved `audio-reference` asset whose path and SHA256 exactly match the master. Supplemental tracks are SFX, voiceover and ambience only, so there is no second declaration of the main music.
+
+New master fields:
+
+```json
+"audio": {
+  "path": "source/audio/music.flac",
+  "sha256": "<64 hex>",
+  "durationSeconds": 2,
+  "durationPolicy": "round",
+  "format": "flac",
+  "assetId": "AUDIO-MUSIC",
+  "mixSampleRate": 48000,
+  "gainDb": -2,
+  "fadeInFrames": 0,
+  "fadeOutFrames": 0,
+  "gainAutomation": [
+    {"frame": 30, "gainDb": 0},
+    {"frame": 32, "gainDb": -8},
+    {"frame": 44, "gainDb": -8},
+    {"frame": 46, "gainDb": 0}
+  ]
+}
+```
+
+`mixSampleRate` is `44100` or `48000` (default `48000`). Master automation frames are project frames. Frames are integers; gain is in dB and bounded to `[-60, 12]`.
+
+### Track manifest
+
+`audioTracks` is optional and backward compatible. Each track references an approved `audio-reference` asset:
+
+```json
+"audioTracks": [
+  {
+    "id": "sfx-01",
+    "role": "sfx",
+    "assetId": "AUDIO-SFX",
+    "startFrame": 20,
+    "durationFrames": 12,
+    "sourceStartSeconds": 0.1,
+    "gainDb": -3,
+    "fadeInFrames": 1,
+    "fadeOutFrames": 4,
+    "muted": false,
+    "gainAutomation": []
+  }
+]
+```
+
+- `role` is `sfx`, `voiceover` or `ambience`.
+- `startFrame` and `durationFrames` are output frames; the range is half-open.
+- `sourceStartSeconds` must align to an output-frame boundary and selects the source in-point.
+- `gainAutomation` points are local to the track start, strictly increasing and bounded to 32 points.
+- Fades are linear in the frame-derived sample domain and must fit the track duration.
+- `muted` excludes the track from the mix while retaining its validated identity and report entry.
+- Array order is the deterministic track order; overlapping tracks are summed.
+
+### Frame/sample mapping and mix policy
+
+- `sampleIndex = Math.round(frame * sampleRate / outputFps)` for non-negative integer frames; ranges remain half-open. This is nearest-sample rounding, explicitly including non-integer ratios such as 44,100/24.
+- Project mix samples = `Math.round(durationInFrames * sampleRate / outputFps)`.
+- Fade lengths map through the same function.
+- The final mix starts at frame 0 and ends at the project frame duration. A track cannot start before its declared frame, exceed its declared duration or read beyond its decoded source.
+- A render subrange `[start, end]` uses the mix interval `[start, end + 1)`, sliced on frame-derived sample boundaries. It never reuses the first samples of the soundtrack.
+- Video and audio stream durations can differ by at most the sample-rounding remainder (well under one audio sample per boundary; observed 0.012 ms in the 44.1 kHz boundary fixture). The video frame count is unchanged.
+
+Every approved source is decoded by FFmpeg to stereo signed 16-bit PCM at the project mix rate. Mixing is deterministic Node code: source in-point, linear gain conversion, linear fades, linear dB automation, summation, then a documented headroom policy. If the summed peak exceeds `0.999`, one deterministic global gain scales the whole mix to `0.999`; the report records peak before/after, limiter gain, pre-limiter overflow samples and post-limiter clipped samples. There is no automatic loudness normalization and no silent song-wide level change to hide clipping.
+
+A single mix WAV is written under `<project>/cache/audio-mix/`, with normalized source copies under `<project>/cache/audio-normalized/`. The final MP4 muxes AAC from that WAV exactly once. Embedded video audio remains muted; Remotion `<Audio>` also references only the generated mix. Preview uses the PCM mix through Remotion; the final file uses AAC encoding of the same mix. They are semantically consistent but not sample-identical, and the engine makes no sample-identical preview/final claim.
+
+### Deterministic cue analysis
+
+The render writes `<project>/reports/audio-analysis-<projectId>.json` from the master source. It contains duration, windowed RMS and peak envelopes, peak position, candidate onsets and analysis parameters. Every onset records the source SHA256, algorithm version, window/onset parameters, timestamp, frame, `source: "estimated"`, `classification: "estimated"`, `confidence: null` and an energy metric.
+
+This is a foundation for manual cue planning, not music understanding. It does not claim BPM, meter, sections, chorus boundaries, emotion, lyrics or automatic ducking. Manual `project.cues` remain authoritative; the analysis report is separate and never rewrites approved cue points. No transcription or lyrics generation is performed.
+
+### Provenance, privacy and troubleshooting
+
+- Audio assets must remain project-local, manifest-declared, approved, hash-verified and accompanied by source/rights strings. Probe metadata records container, codec, sample rate, channels/layout, decoded duration, start time, encoder delay/padding, file size and SHA256. Absolute paths, traversal, links, cross-project references and hash mismatches fail closed.
+- Original audio is read-only. Normalized copies, mixes, analyses and renders are external project cache/report outputs and must never be committed.
+- FFmpeg and FFprobe are required for non-WAV probing, decoding/normalization and final muxing. If FFprobe is missing, loading a non-WAV master fails with an actionable error; if FFmpeg is missing, mixing fails rather than silently muxing the source.
+- A decoded-duration mismatch usually means a wrong file, a declaration copied from another format, or heavy padding. The tolerance is 0.02 s for WAV and `max(0.05 s, 1/outputFps)` for lossy formats. AAC/MP3 priming is a decoder concern, not timeline drift; do not “fix” it by shifting the project.
+- If a track is rejected for source length, shorten its duration or in-point or provide a longer approved source. If the mix reports limiter gain, reduce source/track gain instead of relying on the limiter.
+- For preview/final checks, decode the actual output with FFmpeg and compare tone/onset timing; do not infer success from the presence of an AAC stream. `npm run audio:verify` performs this measurement for the three synthetic projects. In the 44.1 kHz boundary fixture, a coarse 10 ms analysis window starts before the pulse; the sample-level evidence separates that window start from the real leading edge and the 12 ms pulse center.
+
+## 14. Project-local scene modules
 
 A project can declare self-contained Canvas 2D modules under its own `scenes/` directory:
 
@@ -274,7 +386,7 @@ A matching hash proves byte identity, not benign behavior. Only run user-authore
 
 See `docs/project-config.md`, `docs/rendering.md` and `docs/workspace-safety.md` for the full contract, negative tests and remaining trust boundary.
 
-## 14. Third-party acknowledgments
+## 15. Third-party acknowledgments
 
 - [Remotion](https://www.remotion.dev/) — video framework. Remotion has its own license terms; review https://remotion.pro/license before commercial use.
 - [React](https://react.dev/) — MIT.

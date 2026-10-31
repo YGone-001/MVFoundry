@@ -1,0 +1,288 @@
+{
+  "schemaVersion": 1,
+  "projectId": "synthetic-audio-multitrack-demo",
+  "song": {
+    "title": "Synthetic Multitrack Mix Demo",
+    "artist": "Factory Fixtures"
+  },
+  "audio": {
+    "path": "source/audio/music.flac",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "durationSeconds": 2,
+    "durationPolicy": "round",
+    "format": "flac",
+    "assetId": "AUDIO-MUSIC",
+    "mixSampleRate": 48000,
+    "gainDb": -2,
+    "fadeInFrames": 0,
+    "fadeOutFrames": 0,
+    "gainAutomation": [
+      {
+        "frame": 30,
+        "gainDb": 0
+      },
+      {
+        "frame": 32,
+        "gainDb": -8
+      },
+      {
+        "frame": 44,
+        "gainDb": -8
+      },
+      {
+        "frame": 46,
+        "gainDb": 0
+      }
+    ]
+  },
+  "lyrics": {
+    "language": "none",
+    "path": null
+  },
+  "narrative": {
+    "mode": "abstract"
+  },
+  "visual": {
+    "styleProfile": "video-foundation",
+    "defaultRenderer": "hybrid"
+  },
+  "output": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30
+  },
+  "cues": [
+    {
+      "id": "CUE-01",
+      "frame": 0,
+      "timeSeconds": 0,
+      "source": "synthetic",
+      "label": "start"
+    },
+    {
+      "id": "CUE-02",
+      "frame": 20,
+      "timeSeconds": 0.6666666666666666,
+      "source": "synthetic",
+      "label": "sfx-start"
+    },
+    {
+      "id": "CUE-03",
+      "frame": 32,
+      "timeSeconds": 1.0666666666666667,
+      "source": "synthetic",
+      "label": "voice-start"
+    },
+    {
+      "id": "CUE-04",
+      "frame": 60,
+      "timeSeconds": 2,
+      "source": "synthetic",
+      "label": "end"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "CH-01",
+      "title": "Hybrid A",
+      "startFrame": 0,
+      "endFrame": 30,
+      "shots": [
+        {
+          "id": "SHOT-01",
+          "startFrame": 0,
+          "endFrame": 30,
+          "renderer": "hybrid",
+          "params": {
+            "background": "#05080D",
+            "accent": "#2EC4B6"
+          },
+          "media": {
+            "kind": "hybrid",
+            "video": {
+              "assetId": "VIDEO-01",
+              "sourceStartSeconds": 0,
+              "fit": "cover",
+              "endBehavior": "reject",
+              "muted": true
+            },
+            "layers": [
+              {
+                "assetId": "LAYER-01",
+                "order": 0,
+                "opacity": 0.9,
+                "fit": "contain",
+                "positionX": 0,
+                "positionY": 0,
+                "scale": 1,
+                "visibleFromFrame": 0,
+                "visibleToFrame": 30
+              }
+            ],
+            "overlay": {
+              "kind": "scan",
+              "intensity": 0.3,
+              "color": "#2EC4B6"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "CH-02",
+      "title": "Hybrid B",
+      "startFrame": 30,
+      "endFrame": 60,
+      "shots": [
+        {
+          "id": "SHOT-02",
+          "startFrame": 30,
+          "endFrame": 60,
+          "renderer": "hybrid",
+          "params": {
+            "background": "#0B1B2B",
+            "accent": "#FF9F1C"
+          },
+          "media": {
+            "kind": "hybrid",
+            "video": {
+              "assetId": "VIDEO-01",
+              "sourceStartSeconds": 1,
+              "fit": "contain",
+              "endBehavior": "reject",
+              "muted": true,
+              "scale": 0.95
+            },
+            "layers": [
+              {
+                "assetId": "LAYER-01",
+                "order": 0,
+                "opacity": 0.85,
+                "fit": "contain",
+                "positionX": 0,
+                "positionY": 0,
+                "scale": 1.1,
+                "visibleFromFrame": 0,
+                "visibleToFrame": 30
+              }
+            ],
+            "overlay": {
+              "kind": "orbits",
+              "intensity": 0.45,
+              "color": "#FF9F1C"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "sceneModules": [],
+  "audioTracks": [
+    {
+      "id": "sfx-01",
+      "role": "sfx",
+      "assetId": "AUDIO-SFX",
+      "startFrame": 20,
+      "durationFrames": 12,
+      "sourceStartSeconds": 0.1,
+      "gainDb": -3,
+      "fadeInFrames": 1,
+      "fadeOutFrames": 4,
+      "muted": false,
+      "gainAutomation": []
+    },
+    {
+      "id": "voice-01",
+      "role": "voiceover",
+      "assetId": "AUDIO-VOICE",
+      "startFrame": 32,
+      "durationFrames": 12,
+      "sourceStartSeconds": 0.1,
+      "gainDb": -6,
+      "fadeInFrames": 2,
+      "fadeOutFrames": 2,
+      "muted": false,
+      "gainAutomation": []
+    },
+    {
+      "id": "ambience-01",
+      "role": "ambience",
+      "assetId": "AUDIO-AMBIENCE",
+      "startFrame": 8,
+      "durationFrames": 40,
+      "sourceStartSeconds": 0,
+      "gainDb": -18,
+      "fadeInFrames": 4,
+      "fadeOutFrames": 4,
+      "muted": false,
+      "gainAutomation": []
+    }
+  ],
+  "assets": [
+    {
+      "id": "AUDIO-MUSIC",
+      "kind": "audio-reference",
+      "path": "source/audio/music.flac",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source": "Procedural synthetic FLAC fixture generated by factory/scripts/seed-audio-workspace.mjs",
+      "rights": "Synthetic fixture; no third-party rights",
+      "approval": "approved"
+    },
+    {
+      "id": "AUDIO-SFX",
+      "kind": "audio-reference",
+      "path": "source/audio/sfx-1200hz.wav",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source": "Procedural synthetic WAV fixture generated by factory/scripts/seed-audio-workspace.mjs",
+      "rights": "Synthetic fixture; no third-party rights",
+      "approval": "approved"
+    },
+    {
+      "id": "AUDIO-VOICE",
+      "kind": "audio-reference",
+      "path": "source/audio/voice-440hz.wav",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source": "Procedural synthetic WAV fixture generated by factory/scripts/seed-audio-workspace.mjs",
+      "rights": "Synthetic fixture; no third-party rights",
+      "approval": "approved"
+    },
+    {
+      "id": "AUDIO-AMBIENCE",
+      "kind": "audio-reference",
+      "path": "source/audio/ambience-110hz.m4a",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source": "Procedural synthetic AAC/M4A fixture generated by factory/scripts/seed-audio-workspace.mjs",
+      "rights": "Synthetic fixture; no third-party rights",
+      "approval": "approved"
+    },
+    {
+      "id": "VIDEO-01",
+      "kind": "video",
+      "path": "assets/video/background-24fps.mp4",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source": "Procedural synthetic fixture generated by factory/scripts/seed-audio-workspace.mjs",
+      "rights": "Synthetic fixture; no third-party rights",
+      "approval": "approved"
+    },
+    {
+      "id": "LAYER-01",
+      "kind": "layer",
+      "path": "assets/layers/ring.png",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source": "Procedural synthetic fixture generated by factory/scripts/seed-audio-workspace.mjs",
+      "rights": "Synthetic fixture; no third-party rights",
+      "approval": "approved"
+    }
+  ],
+  "permissions": {
+    "externalGeneration": false,
+    "localOnly": true,
+    "allowNetwork": false
+  },
+  "render": {
+    "codec": "h264",
+    "pixelFormat": "yuv420p",
+    "colorSpace": "bt709",
+    "imageFormat": "png"
+  }
+}
