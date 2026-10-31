@@ -72,6 +72,12 @@ The pinned Windows CI FFmpeg build is the same checksum-verified BtbN GPL shared
 
 Dependency entries and the lockfile are unchanged by this feature. The `zod@4.5.4` advisory set above remains visible and unresolved. FFmpeg-dependent unit tests skip on hosts without FFmpeg and execute in CI after the pinned provisioning step; audio render evidence is reported NOT RUN when the tools are unavailable.
 
+## Preproduction dependency impact
+
+Music-aware preproduction adds **no npm dependency**. Beat-grid analysis, manual annotation validation, LRC/JSON lyric parsing, creative-brief validation, director planning, storyboard generation, asset requirements, candidate compilation and the local CLI use existing TypeScript/Node APIs and the existing project validator/write boundary. No AI model, audio classification service, transcription provider, image/video generator or network adapter is used.
+
+The synthetic preproduction acceptance projects generate WAVs with a local Node script and render a preview through the existing Remotion/audio path. Generated plans, lyrics, assets, mixes and previews remain external. The dependency set and the `zod@4.5.4` advisory status are unchanged by this feature.
+
 ## External scene-module dependency impact
 
 External scene module loading introduces no new runtime or development dependencies. It uses the existing TypeScript compiler for static source analysis, the existing Remotion webpack bundler for the staged entry and the existing React/Remotion stack for rendering. The dependency entries in `package.json` and `package-lock.json` are unchanged by this feature; the advisory set above remains visible and unresolved.

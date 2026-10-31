@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "projectId": "synthetic-lyrics-demo",
+  "bpm": {
+    "value": 96,
+    "source": "user",
+    "approval": "approved",
+    "notes": "Manual tempo for an intentionally sparse synthetic pulse."
+  },
+  "beatAnchors": [
+    {"id": "BEAT-001", "frame": 0, "timeSeconds": 0, "source": "user", "approval": "approved"},
+    {"id": "BEAT-002", "frame": 15, "timeSeconds": 0.625, "source": "user", "approval": "approved"},
+    {"id": "BEAT-003", "frame": 30, "timeSeconds": 1.25, "source": "user", "approval": "approved"},
+    {"id": "BEAT-004", "frame": 45, "timeSeconds": 1.875, "source": "user", "approval": "approved"},
+    {"id": "BEAT-005", "frame": 60, "timeSeconds": 2.5, "source": "user", "approval": "approved"},
+    {"id": "BEAT-006", "frame": 75, "timeSeconds": 3.125, "source": "user", "approval": "approved"}
+  ],
+  "cutCues": [
+    {"id": "CUT-001", "frame": 12, "timeSeconds": 0.5, "label": "first-lyric-image", "source": "user", "approval": "approved"},
+    {"id": "CUT-002", "frame": 36, "timeSeconds": 1.5, "label": "second-lyric-image", "source": "user", "approval": "approved"},
+    {"id": "CUT-003", "frame": 60, "timeSeconds": 2.5, "label": "third-lyric-image", "source": "user", "approval": "approved"}
+  ],
+  "sections": [
+    {
+      "id": "SEC-01",
+      "label": "intro",
+      "startFrame": 0,
+      "endFrame": 24,
+      "source": "user",
+      "approval": "approved",
+      "notes": "The listener enters the empty city."
+    },
+    {
+      "id": "SEC-02",
+      "label": "verse",
+      "startFrame": 24,
+      "endFrame": 72,
+      "source": "user",
+      "approval": "approved",
+      "notes": "The signal and the tower exchange images."
+    },
+    {
+      "id": "SEC-03",
+      "label": "outro",
+      "startFrame": 72,
+      "endFrame": 96,
+      "source": "user",
+      "approval": "approved",
+      "notes": "The reply remains unresolved."
+    }
+  ]
+}

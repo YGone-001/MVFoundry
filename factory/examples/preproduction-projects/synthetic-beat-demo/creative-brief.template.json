@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "projectId": "synthetic-beat-demo",
+  "source": "user",
+  "approval": "approved",
+  "concept": "A neon mechanical garden wakes under a pulse of light.",
+  "narrativeMode": "abstract",
+  "moodProgression": ["stillness", "curiosity", "kinetic bloom", "release"],
+  "visualStyle": "pixel-art",
+  "aspectRatio": "16:9",
+  "palette": ["#081622", "#2EC4B6", "#FF9F1C", "#E9E3D2"],
+  "characters": [],
+  "setting": "a mechanical garden of glass reeds and copper flowers",
+  "continuityRules": [
+    "Keep the copper flower motif visible in every shot.",
+    "Use mint light for growth and amber light for release.",
+    "Maintain a single horizon line across the sequence."
+  ],
+  "pacing": {
+    "preferredShotFrames": 20,
+    "minShotFrames": 12,
+    "maxShotFrames": 25,
+    "allowBeatCuts": true
+  },
+  "cameraLanguage": [
+    "low lateral tracking shot",
+    "slow push through reeds",
+    "high-angle establishing view",
+    "close macro orbit"
+  ],
+  "transitions": [
+    "hard cut on the pulse",
+    "light wipe through a copper reflection",
+    "hard cut on the pulse"
+  ],
+  "approvedReferences": [],
+  "excludedElements": ["literal human faces", "text overlays"],
+  "productionConstraints": [
+    "Use the existing pixel-canvas renderer only.",
+    "No generated assets are required for this synthetic preview."
+  ],
+  "preferredRenderers": ["pixel-canvas"],
+  "requiredAssets": [],
+  "assumptions": [
+    "The garden is an abstract visual metaphor, not a literal location.",
+    "The offbeat transient is an accent, not a second beat grid."
+  ]
+}

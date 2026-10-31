@@ -1,6 +1,6 @@
 ---
 name: remotion-mv-compositor
-description: Maintain the reusable Remotion composition engine for MVFoundry. Use when adding renderers, resolving frame ownership, changing aspect ratios or frame rates, wiring local media, implementing Video or Hybrid shots, loading approved project-local scene modules, ingesting or mixing audio, preserving soundtrack timing, or keeping legacy compositions working.
+description: Maintain the reusable Remotion composition engine for MVFoundry. Use when adding renderers, resolving frame ownership, changing aspect ratios or frame rates, wiring local media, implementing Video or Hybrid shots, loading approved project-local scene modules, ingesting or mixing audio, compiling approved preproduction storyboards into candidate configs, preserving soundtrack timing, or keeping legacy compositions working.
 ---
 
 # Remotion MV Compositor
@@ -132,3 +132,14 @@ Owns the generic frame-to-pixels engine in `factory/`. Song-specific scenes and 
 - Missing FFmpeg/FFprobe for a required non-WAV decode or mux: fail with an actionable error; never mux a fallback stream.
 - Unsafe output or cleanup path: fail before writing; do not fall back to a default or a repository path.
 - Render tool failure or unavailable browser/FFmpeg/FFprobe: report NOT RUN with the exact command and error; never claim success.
+
+## Preproduction candidate rendering
+
+- `render-project --config <project-relative-json>` loads a separately approved candidate config through the normal project loader, while the default remains `project.json`.
+- The accepted candidate must preserve the project ID, master audio/hash, fps, duration, cue identity, audio tracks, assets and renderer contracts.
+- Never overwrite `project.json` automatically. Compile a separate candidate only after storyboard approval and fulfilled asset requirements.
+- A missing-asset storyboard must remain blocked; no invented asset IDs, placeholder media or accepted-looking candidate.
+- The candidate's storyboard chapters/shots are the actual shot selection for `render-preview`; verify decoded frame changes at storyboard cuts and the final audio stream.
+- Shot boundaries may come only from approved manual timing, an explicitly approved beat-grid candidate (`approve-beats`), project cues, lyric lines or section edges. Frame 0 is never a detected beat, so a start cut needs an approved manual anchor.
+- Verify the render report's `configPath` is the compiled candidate, not `project.json`, so the accepted storyboard is what actually rendered.
+- Preproduction planning must not alter the master soundtrack, frame ownership or renderer sampling.

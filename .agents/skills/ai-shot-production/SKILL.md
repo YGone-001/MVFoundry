@@ -1,6 +1,6 @@
 ---
 name: ai-shot-production
-description: Provider-neutral production contracts for AI-generated images and video in the AI Music Video Factory. Use when specifying keyframes, choosing AI versus layered or procedural shots, validating provider capability, tracking asset hashes and provenance, integrating approved local generated media into Video/Hybrid shots, or requesting explicit authorization before any external transmission.
+description: Provider-neutral production contracts for AI-generated images and video in the AI Music Video Factory. Use when specifying keyframes, choosing AI versus layered or procedural shots, validating provider capability, tracking asset hashes and provenance, maintaining preproduction asset requirement manifests, integrating approved local media into Video/Hybrid shots, or requesting explicit authorization before any external transmission.
 ---
 
 # AI Shot Production
@@ -80,3 +80,11 @@ Defines how generated media may enter a local project. P0 authorizes no provider
 - Off-contract or unusable output: quarantine and reject; do not silently retry with changed prompts.
 - Provider non-determinism or version drift: record it and require review.
 - Any unavailable validation is reported NOT RUN.
+
+## Preproduction asset requirements
+
+- Director plans may produce an asset requirements manifest. A requirement ID, prompt or visual description is not an asset.
+- Track each requirement's kind, shot IDs, target aspect ratio, duration/alpha needs, continuity references, provenance requirements and status (`needed`, `in-production`, `available`, `approved`, `rejected`).
+- Fulfil a requirement only with an approved, hash-verified local file or declared scene module. No provider or generator is invoked in this phase.
+- Compile only an approved storyboard whose requirements are fulfilled. Otherwise return a missing-assets report and keep the plan draft/blocked.
+- Preserve user-authored lyrics and creative direction; do not infer narrative, metaphor or character motivation from lyric text automatically.

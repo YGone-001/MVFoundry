@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "projectId": "synthetic-lyrics-demo",
+  "source": "user",
+  "approval": "approved",
+  "concept": "A listener in an empty radio city answers a signal that may be its own echo.",
+  "narrativeMode": "narrative",
+  "moodProgression": ["loneliness", "curiosity", "tentative contact", "unresolved hope"],
+  "visualStyle": "filmic illustration",
+  "aspectRatio": "4:3",
+  "palette": ["#14202B", "#7DD3FC", "#F59E0B", "#E5E7EB"],
+  "characters": ["the listener"],
+  "setting": "an empty radio city at dusk, with a single tower above wet streets",
+  "continuityRules": [
+    "The listener remains a distant silhouette, never a close portrait.",
+    "Keep the tower's red beacon visible whenever the city is shown.",
+    "Use amber only for the reply signal."
+  ],
+  "pacing": {
+    "preferredShotFrames": 24,
+    "minShotFrames": 12,
+    "maxShotFrames": 30,
+    "allowBeatCuts": true
+  },
+  "cameraLanguage": [
+    "wide establishing frame",
+    "slow lateral street-level view",
+    "low-angle tower view",
+    "quiet close detail of the receiver"
+  ],
+  "transitions": [
+    "match cut on the beacon",
+    "soft dissolve through rain",
+    "hard cut on the reply pulse"
+  ],
+  "approvedReferences": [],
+  "excludedElements": ["readable real-world lyrics", "brand logos", "crowds"],
+  "productionConstraints": [
+    "The visual direction is user-authored; the parser does not interpret lyric metaphor or emotion.",
+    "One approved still-image asset is required for the establishing shot; it is intentionally missing in this synthetic acceptance project."
+  ],
+  "preferredRenderers": ["layered-canvas"],
+  "requiredAssets": [
+    {
+      "kind": "image",
+      "description": "Wide establishing image of a lone signal tower above an empty rain-slick city at dusk; muted teal and cool grey, strong vertical antenna silhouette, no text or logos.",
+      "visualStyle": "filmic illustration",
+      "alphaRequired": false,
+      "continuityReferences": ["the listener", "the signal tower"]
+    }
+  ],
+  "assumptions": [
+    "Lyrics are an original synthetic test text, not a real song.",
+    "The missing image remains an explicit production requirement; the plan is not render-ready without an approved local file."
+  ]
+}

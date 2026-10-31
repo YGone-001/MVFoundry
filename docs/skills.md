@@ -6,11 +6,11 @@ Five complete Skills live in `.agents/skills/`:
 
 | Skill | Purpose |
 |---|---|
-| `music-video-director` | Song structure, treatment, chapters, cues and integer-frame shot planning, including estimated analysis provenance |
-| `visual-identity-continuity` | Style profiles, palettes, character/environment contracts and continuity audits |
-| `ai-shot-production` | Provider-neutral shot contracts, keyframes, hashes, provenance, authorization and approved audio-source integration |
-| `remotion-mv-compositor` | Frame clock, scene registry, Canvas/Video/Hybrid renderers, multi-format audio ingestion/mixing, trusted project module bundling, local media and rendering |
-| `music-video-quality-gate` | Evidence-based acceptance, audio/video/media/module isolation and decoded-output checks, PASS/FAIL/BLOCKED/NOT RUN reporting |
+| `music-video-director` | Beat-grid evidence, manual timing/sections, optional lyrics, creative direction, director plans and frame-accurate storyboards |
+| `visual-identity-continuity` | Style profiles, creative briefs, palettes, character/environment contracts, continuity references and asset-direction audits |
+| `ai-shot-production` | Provider-neutral shot contracts, asset requirement manifests, keyframes, hashes, provenance, authorization and approved media/audio integration |
+| `remotion-mv-compositor` | Frame clock, scene registry, Canvas/Video/Hybrid renderers, audio mixing, preproduction plan/storyboard compilation, trusted modules, local media and rendering |
+| `music-video-quality-gate` | Evidence-based acceptance for timing, beat-grid uncertainty, manual overrides, storyboard coverage, asset fulfillment, candidate compilation, decoded audio/video and PASS/FAIL/BLOCKED/NOT RUN |
 
 Each has YAML frontmatter whose `name` matches its folder and contains activation conditions, input and output contracts, workflow, prohibited actions, acceptance checks and failure behavior. They are song-independent and contain no private references or production prompts.
 

@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "projectId": "synthetic-beat-grid-demo",
+  "source": "user",
+  "approval": "approved",
+  "concept": "Tide light advances and drains across a dark tiled harbour.",
+  "narrativeMode": "abstract",
+  "moodProgression": ["expectant", "gathering", "spilling", "draining"],
+  "visualStyle": "pixel-art",
+  "aspectRatio": "16:9",
+  "palette": ["#071018", "#7BDFF2", "#F2B705", "#E9E3D2"],
+  "characters": [],
+  "setting": "a tiled harbour mouth under a low moon",
+  "continuityRules": [
+    "Keep the horizon line in the upper third in every shot.",
+    "Cyan reads as advancing water, amber as draining light.",
+    "One tile grid motif stays visible throughout."
+  ],
+  "pacing": {
+    "preferredShotFrames": 20,
+    "minShotFrames": 12,
+    "maxShotFrames": 30,
+    "allowBeatCuts": true
+  },
+  "cameraLanguage": [
+    "locked wide on the harbour mouth",
+    "slow lateral drift with the tide",
+    "high-angle look down the tiles"
+  ],
+  "transitions": [
+    "hard cut on the approved beat",
+    "wipe of foam across the tiles",
+    "hard cut on the approved beat"
+  ],
+  "approvedReferences": [],
+  "excludedElements": ["literal humans", "text overlays", "generated photography"],
+  "productionConstraints": [
+    "Use the existing pixel-canvas renderer only.",
+    "No generated assets are required for this synthetic preview.",
+    "Shot cuts may only use timing that a reviewer approved explicitly."
+  ],
+  "preferredRenderers": ["pixel-canvas"],
+  "requiredAssets": [],
+  "assumptions": [
+    "The harbour is an abstract motif, not a literal location.",
+    "The offbeat transient is an accent; it is not a second beat grid.",
+    "The reviewer, not the analyzer, chooses between competing tempo interpretations."
+  ]
+}

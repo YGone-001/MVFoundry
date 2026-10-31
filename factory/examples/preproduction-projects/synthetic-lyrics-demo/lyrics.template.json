@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "language": "en",
+  "format": "json",
+  "approval": "approved",
+  "lines": [
+    {
+      "timeSeconds": 0.5,
+      "text": "A signal wakes in the quiet wire",
+      "sectionId": "SEC-01"
+    },
+    {
+      "timeSeconds": 1.5,
+      "text": "I answer with a borrowed light",
+      "sectionId": "SEC-02"
+    },
+    {
+      "timeSeconds": 2.5,
+      "text": "The empty streets remember rain",
+      "sectionId": "SEC-02"
+    },
+    {
+      "timeSeconds": 3.5,
+      "text": "A distant tower answers twice",
+      "sectionId": "SEC-03"
+    }
+  ]
+}

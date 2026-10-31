@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "projectId": "synthetic-beat-demo",
+  "bpm": {
+    "value": 120,
+    "source": "user",
+    "approval": "approved",
+    "notes": "Synthetic ground truth used to approve the constant-tempo plan."
+  },
+  "beatAnchors": [
+    {"id": "BEAT-001", "frame": 0, "timeSeconds": 0, "source": "user", "approval": "approved"},
+    {"id": "BEAT-002", "frame": 15, "timeSeconds": 0.5, "source": "user", "approval": "approved"},
+    {"id": "BEAT-003", "frame": 30, "timeSeconds": 1, "source": "user", "approval": "approved"},
+    {"id": "BEAT-004", "frame": 45, "timeSeconds": 1.5, "source": "user", "approval": "approved"},
+    {"id": "BEAT-005", "frame": 60, "timeSeconds": 2, "source": "user", "approval": "approved"},
+    {"id": "BEAT-006", "frame": 75, "timeSeconds": 2.5, "source": "user", "approval": "approved"},
+    {"id": "BEAT-007", "frame": 90, "timeSeconds": 3, "source": "user", "approval": "approved"},
+    {"id": "BEAT-008", "frame": 105, "timeSeconds": 3.5, "source": "user", "approval": "approved"}
+  ],
+  "cutCues": [
+    {"id": "CUT-001", "frame": 30, "timeSeconds": 1, "label": "verse", "source": "user", "approval": "approved"},
+    {"id": "CUT-002", "frame": 75, "timeSeconds": 2.5, "label": "chorus", "source": "user", "approval": "approved"}
+  ],
+  "sections": [
+    {
+      "id": "SEC-01",
+      "label": "intro",
+      "startFrame": 0,
+      "endFrame": 30,
+      "source": "user",
+      "approval": "approved",
+      "notes": "Sparse pulse; establish the mechanical garden."
+    },
+    {
+      "id": "SEC-02",
+      "label": "verse",
+      "startFrame": 30,
+      "endFrame": 75,
+      "source": "user",
+      "approval": "approved",
+      "notes": "Copper reeds answer the pulse."
+    },
+    {
+      "id": "SEC-03",
+      "label": "chorus",
+      "startFrame": 75,
+      "endFrame": 120,
+      "source": "user",
+      "approval": "approved",
+      "notes": "Kinetic bloom and release."
+    }
+  ]
+}

@@ -85,6 +85,10 @@ jobs:
         run: npm run audio:seed
       - name: Verify multi-format audio, multitrack mix and cues
         run: npm run audio:verify
+      - name: Seed synthetic preproduction workspace
+        run: npm run preproduction:seed
+      - name: Verify preproduction planning and storyboard preview
+        run: npm run preproduction:verify
       - name: Publication audit
         run: npm run audit:publication
       - name: Git media audit

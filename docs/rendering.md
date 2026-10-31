@@ -230,3 +230,24 @@ For audio acceptance, `npm run audio:verify` decodes the actual output audio. Ch
 - master/track source hashes before and after rendering.
 
 An MP4 containing an AAC stream is not, by itself, evidence of correct audio mixing. A skipped media/audio step is NOT RUN, never PASS.
+
+## Preproduction storyboard preview
+
+The preproduction layer writes a separate validated candidate config and never overwrites `project.json`. After an approved storyboard compiles:
+
+```bash
+npm run preproduction -- analyze-beats --project synthetic-beat-demo
+npm run preproduction -- approve-beats --project synthetic-beat-demo \
+  --interpretation as-estimated --acknowledge-ambiguity --notes "<review>"
+npm run preproduction -- validate --project synthetic-beat-demo
+npm run preproduction -- plan --project synthetic-beat-demo
+npm run preproduction -- approve-plan --project synthetic-beat-demo
+npm run preproduction -- storyboard --project synthetic-beat-demo
+npm run preproduction -- approve-storyboard --project synthetic-beat-demo
+npm run preproduction -- compile --project synthetic-beat-demo
+npm run preproduction -- render-preview --project synthetic-beat-demo --frames 0-119
+```
+
+The preview loads `preproduction/project-candidate.json` through the normal loader, stages the same approved audio/assets, builds the master mix, and renders `renders/storyboard-preview.mp4`. The candidate chapters and shots are the actual shot selection used by `renderFrames`. Verify decoded output frame changes at storyboard cuts, the final audio stream, source hashes and a fresh beat analysis of the decoded soundtrack; JSON output alone is not preview evidence. `npm run preproduction:verify` performs these checks for the synthetic projects and reports external evidence.
+
+A storyboard with missing assets returns a blocked compile and never produces a candidate or preview. The lyrics fixture is synthetic; real lyrics remain external and must never be committed.

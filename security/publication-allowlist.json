@@ -23,6 +23,7 @@
     "factory/examples/projects",
     "factory/examples/media-projects",
     "factory/examples/audio-projects",
+    "factory/examples/preproduction-projects",
     ".agents/skills/music-video-director",
     ".agents/skills/visual-identity-continuity",
     ".agents/skills/ai-shot-production",

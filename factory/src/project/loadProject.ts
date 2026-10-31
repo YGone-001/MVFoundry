@@ -25,14 +25,15 @@ export type LoadProjectOptions = {
   workspaceRoot?: string;
   engineRoot?: string;
   registry?: SceneRegistry;
+  configPath?: string;
 };
 
-const readProjectJson = (projectDir: string): unknown => {
+const readProjectJson = (configFile: string, label: string): unknown => {
   try {
-    return JSON.parse(readFileSync(path.join(projectDir, 'project.json'), 'utf8')) as unknown;
+    return JSON.parse(readFileSync(configFile, 'utf8')) as unknown;
   } catch (error) {
     throw new ConfigValidationError(
-      `Unable to read project.json: ${error instanceof Error ? error.message : String(error)}`,
+      `Unable to read ${label}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 };
@@ -57,7 +58,12 @@ export const loadProject = (
     );
   }
 
-  const config = validateProjectConfig(readProjectJson(projectDir), {
+  const configFile = options.configPath
+    ? resolveProjectRelativePath(projectDir, options.configPath, {
+        engineRoot: options.engineRoot,
+      })
+    : path.join(projectDir, 'project.json');
+  const config = validateProjectConfig(readProjectJson(configFile, options.configPath ?? 'project.json'), {
     rendererKinds: new Set(registry.kinds()),
   });
   if (config.projectId !== projectId) {

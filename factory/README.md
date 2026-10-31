@@ -34,6 +34,8 @@ npm run media:seed
 npm run media:verify
 npm run audio:seed
 npm run audio:verify
+npm run preproduction:seed
+npm run preproduction:verify
 ```
 
 Set `REMOTION_BROWSER_EXECUTABLE` or `CHROME_PATH` when Remotion cannot locate a browser. Video encoding requires system FFmpeg on `PATH`; media/audio seeding, format probing, normalization and muxing also require FFmpeg and FFprobe.
@@ -45,6 +47,25 @@ Set `REMOTION_BROWSER_EXECUTABLE` or `CHROME_PATH` when Remotion cannot locate a
 ## Audio
 
 The master `audio` supports WAV (16-bit PCM), MP3, FLAC and AAC-in-M4A, identified by content and verified by decoded duration. Optional `audioTracks` add approved SFX, voiceover and ambience with frame ranges, source in-points, gain, fades and bounded automation. One deterministic PCM mix (44.1/48 kHz stereo) is built under the external project cache and is the only source for the final AAC stream; nonzero render subranges slice the corresponding sample interval. Analysis is a deterministic RMS/peak/onset foundation with estimated provenance, not tempo/section/lyric understanding. `audio:seed`/`audio:verify` exercise MP3, FLAC, M4A-AAC, multitrack gain/ducking, 44.1 kHz rounding, subrange alignment and decoded-output evidence. See `docs/project-config.md` §5 and `docs/rendering.md`.
+
+## Music-aware preproduction
+
+`npm run preproduction:seed` creates four external synthetic projects. The local CLI supports `analyze-beats`, `beat-grid-candidates`, `approve-beats`, `validate`, `plan`, `approve-plan`, `storyboard`, `approve-storyboard`, `report-assets`, `compile` and `render-preview`:
+
+```bash
+npm run preproduction -- analyze-beats --project synthetic-beat-grid-demo
+npm run preproduction -- beat-grid-candidates --project synthetic-beat-grid-demo
+npm run preproduction -- approve-beats --project synthetic-beat-grid-demo \
+  --interpretation as-estimated --acknowledge-ambiguity --notes "Selected 90 BPM over the 45 BPM half-tempo reading."
+npm run preproduction -- plan --project synthetic-beat-grid-demo
+npm run preproduction -- approve-plan --project synthetic-beat-grid-demo
+npm run preproduction -- storyboard --project synthetic-beat-grid-demo
+npm run preproduction -- approve-storyboard --project synthetic-beat-grid-demo
+npm run preproduction -- compile --project synthetic-beat-grid-demo
+npm run preproduction -- render-preview --project synthetic-beat-grid-demo --frames 0-119
+```
+
+Beat candidates are estimated and stay `approval: "unapproved"`; only `approve-beats` turns one measured interpretation into timing the planner may use, and that record is re-validated against the current grid so re-analysis makes it stale. Approved manual BPM/anchors/cut cues/sections always take precedence. Plans, storyboards, requirements and candidate configs stay under the external project. Missing assets block compilation; `project.json` is never overwritten. `npm run preproduction:verify` runs the complete workflow for all four projects, renders both the manual-timing and the approved beat-derived preview, and decodes cuts, soundtrack tempo, source hashes and approval/revision immutability. See `docs/preproduction.md`.
 
 ## Project scene modules
 

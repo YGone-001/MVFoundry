@@ -25,6 +25,7 @@ const mode = arg('mode', 'video');
 const stillFrame = Number(arg('frame', '0'));
 const frameRange = arg('frames', '0-23');
 const projectOut = arg('out');
+const configPath = arg('config');
 const concurrency = Number(arg('concurrency', '1'));
 
 if (!projectId) {
@@ -54,7 +55,7 @@ const {
   safeRecreateDirectory,
 } = require('../dist/src/workspace/writeBoundary.js');
 
-const project = loadProject(projectId, {workspaceRoot, engineRoot: repoRoot});
+const project = loadProject(projectId, {workspaceRoot, engineRoot: repoRoot, configPath});
 if (mode === 'still' && (!Number.isInteger(stillFrame) || stillFrame < 0 || stillFrame >= project.durationInFrames)) {
   throw new Error(`Still frame ${stillFrame} is outside [0, ${project.durationInFrames})`);
 }
@@ -271,6 +272,7 @@ try {
     projectId,
     workspaceRoot: project.workspaceRoot,
     projectDir: project.projectDir,
+    configPath: configPath ?? 'project.json',
     publicDir: staged.publicDir,
     publicAssets: staged.publicAssets,
     audioPublicPath: audioMixPublicPath,

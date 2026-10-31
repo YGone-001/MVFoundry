@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "projectId": "synthetic-uncertain-demo",
+  "source": "user",
+  "approval": "approved",
+  "concept": "A vertical transmission drifts through a soft electrical fog.",
+  "narrativeMode": "abstract",
+  "moodProgression": ["uncertain", "suspended", "quietly resolved"],
+  "visualStyle": "abstract motion graphics",
+  "aspectRatio": "9:16",
+  "palette": ["#1B1030", "#8B5CF6", "#F6C177", "#E5E7EB"],
+  "characters": [],
+  "setting": "a vertical field of electrical fog and suspended lines",
+  "continuityRules": [
+    "Keep the violet field continuous across the vertical frame.",
+    "Use amber only for the sparse transient responses.",
+    "Never imply a literal landscape or character."
+  ],
+  "pacing": {
+    "preferredShotFrames": 30,
+    "minShotFrames": 20,
+    "maxShotFrames": 45,
+    "allowBeatCuts": true
+  },
+  "cameraLanguage": [
+    "vertical drift",
+    "slow rise along a suspended line",
+    "static wide field"
+  ],
+  "transitions": [
+    "soft luminance dissolve",
+    "line wipe",
+    "soft luminance dissolve"
+  ],
+  "approvedReferences": [],
+  "excludedElements": ["faces", "text", "literal city skyline"],
+  "productionConstraints": [
+    "Use the existing layered-canvas renderer only.",
+    "No generated assets are required for this synthetic storyboard."
+  ],
+  "preferredRenderers": ["layered-canvas"],
+  "requiredAssets": [],
+  "assumptions": [
+    "The sparse transients are accents, not a reliable beat grid.",
+    "Manual anchors and sections define the editorial timing."
+  ]
+}

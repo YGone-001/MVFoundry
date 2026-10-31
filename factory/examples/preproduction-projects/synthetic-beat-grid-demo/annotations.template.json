@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "projectId": "synthetic-beat-grid-demo",
+  "bpm": null,
+  "beatAnchors": [],
+  "cutCues": [],
+  "sections": [
+    {
+      "id": "SEC-01",
+      "label": "ebb",
+      "startFrame": 0,
+      "endFrame": 60,
+      "source": "user",
+      "approval": "approved",
+      "notes": "Editorial structure only. No manual BPM, beat anchor or cut cue is provided, so every beat cut must come from an approved beat grid."
+    },
+    {
+      "id": "SEC-02",
+      "label": "flood",
+      "startFrame": 60,
+      "endFrame": 120,
+      "source": "user",
+      "approval": "approved",
+      "notes": "Section boundaries are editorial decisions at frames 60 and 120; they are not measured rhythm."
+    }
+  ]
+}

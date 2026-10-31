@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "projectId": "synthetic-uncertain-demo",
+  "bpm": {
+    "value": 90,
+    "source": "user",
+    "approval": "approved",
+    "notes": "Manual structural tempo for a sparse, irregular recording."
+  },
+  "beatAnchors": [
+    {"id": "BEAT-001", "frame": 0, "timeSeconds": 0, "source": "user", "approval": "approved"},
+    {"id": "BEAT-002", "frame": 20, "timeSeconds": 0.6666666666666666, "source": "user", "approval": "approved"},
+    {"id": "BEAT-003", "frame": 40, "timeSeconds": 1.3333333333333333, "source": "user", "approval": "approved"},
+    {"id": "BEAT-004", "frame": 60, "timeSeconds": 2, "source": "user", "approval": "approved"},
+    {"id": "BEAT-005", "frame": 80, "timeSeconds": 2.6666666666666665, "source": "user", "approval": "approved"},
+    {"id": "BEAT-006", "frame": 100, "timeSeconds": 3.3333333333333335, "source": "user", "approval": "approved"}
+  ],
+  "cutCues": [
+    {"id": "CUT-001", "frame": 40, "timeSeconds": 1.3333333333333333, "label": "manual-bridge-cut", "source": "user", "approval": "approved"},
+    {"id": "CUT-002", "frame": 80, "timeSeconds": 2.6666666666666665, "label": "manual-outro-cut", "source": "user", "approval": "approved"}
+  ],
+  "sections": [
+    {
+      "id": "SEC-01",
+      "label": "intro",
+      "startFrame": 0,
+      "endFrame": 20,
+      "source": "user",
+      "approval": "approved",
+      "notes": "A single breath before the sparse events."
+    },
+    {
+      "id": "SEC-02",
+      "label": "bridge",
+      "startFrame": 20,
+      "endFrame": 90,
+      "source": "user",
+      "approval": "approved",
+      "notes": "Manual anchors organize an otherwise irregular span."
+    },
+    {
+      "id": "SEC-03",
+      "label": "outro",
+      "startFrame": 90,
+      "endFrame": 120,
+      "source": "user",
+      "approval": "approved",
+      "notes": "Dissolve into a static field."
+    }
+  ]
+}

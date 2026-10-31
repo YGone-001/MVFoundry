@@ -408,8 +408,12 @@ This is a candidate-event foundation. It does not compute BPM, meter, tempo chan
 - `factory/examples/audio-projects/synthetic-audio-mp3-demo/` — 24fps MP3 master with a referenced PCM source, numeric pixel renderer, two 1 kHz bursts.
 - `factory/examples/audio-projects/synthetic-audio-multitrack-demo/` — 30fps Hybrid project with a FLAC master, WAV SFX/voiceover, AAC/M4A ambience, explicit gain/fades and master ducking automation.
 - `factory/examples/audio-projects/synthetic-audio-boundaries-demo/` — 24fps, 44.1 kHz mix, three synthetic clicks, an odd-frame shot cut at frame 25 and a nonzero render subrange.
+- `factory/examples/preproduction-projects/synthetic-beat-demo/` — 30fps 640×360 strong 120 BPM project with approveable annotations/brief and a real storyboard preview from approved manual timing.
+- `factory/examples/preproduction-projects/synthetic-beat-grid-demo/` — 30fps 640×360 90 BPM project with **no** manual BPM, beat anchor or cut cue, so the approved beat-grid candidate supplies every interior shot cut in its rendered preview.
+- `factory/examples/preproduction-projects/synthetic-uncertain-demo/` — 30fps 540×960 sparse/irregular project planned from manual anchors and sections.
+- `factory/examples/preproduction-projects/synthetic-lyrics-demo/` — 24fps 720×540 synthetic lyrics/narrative project with a deliberately missing image requirement.
 
-Copy the declarative/module projects into `MV_WORKSPACE_ROOT` with `factory/scripts/seed-workspace.mjs`. Generate the media projects with `npm run media:seed` and the audio projects with `npm run audio:seed`. Media/audio templates require FFmpeg/FFprobe and are not directly loadable until seeded.
+Copy the declarative/module projects into `MV_WORKSPACE_ROOT` with `factory/scripts/seed-workspace.mjs`. Generate the media projects with `npm run media:seed`, the audio projects with `npm run audio:seed`, and the preproduction projects with `npm run preproduction:seed`. Media/audio templates require FFmpeg/FFprobe and are not directly loadable until seeded.
 
 ## 8. Adding a new project without engine changes
 
@@ -423,3 +427,24 @@ Copy the declarative/module projects into `MV_WORKSPACE_ROOT` with `factory/scri
 8. For module projects, run `npm run verify:modules`; for media projects, run `npm run media:seed` and `npm run media:verify`; for audio projects, run `npm run audio:seed` and `npm run audio:verify` in a disposable external workspace.
 
 No engine source edit is required for a new duration, fps, dimension, shot count, style profile, declarative renderer configuration, media shot or declared Canvas 2D module.
+
+## 9. Preproduction files and candidate compilation
+
+Preproduction is project-local and does not extend the active `project.json` schema directly. It lives under `<project>/preproduction/`:
+
+| File | Purpose |
+|---|---|
+| `annotations.json` | approved manual BPM, beat anchors, cut cues and half-open sections |
+| `creative-brief.json` | user-authored style-independent direction and pacing |
+| `lyrics.lrc` or `lyrics.json` | optional user-supplied timed lyrics |
+| `beat-grid.json` | versioned estimated beat candidates and evidence; always `approval: "unapproved"` |
+| `approved-beat-grid.json` | one reviewer-selected interpretation of `beat-grid.json`, re-validated against the current grid on every load |
+| `director-plan.json` | proposed/approved plan and revision |
+| `storyboard.json` | execution-facing frame-accurate plan with asset/missing status |
+| `asset-requirements.json` | actionable requirements and fulfillment status |
+| `project-candidate.json` | validated candidate config, written only if render-ready |
+| `compile-report.json` | ready/blocked compilation decision |
+| `missing-assets.json` | blocked-report detail when requirements are unfulfilled |
+| `revisions/` | traceable prior approval, plan and storyboard revisions |
+
+Manual annotations require `source: "user"` and approval. An estimated beat grid never becomes timing on its own: `plan` resolves approved manual timing first, then an explicitly approved grid, and otherwise fails closed with `No approved timing source`. Candidate compilation requires an approved storyboard with no missing requirements, preserves the project's master audio/hash, fps, duration, cue identity, audio tracks and renderer contracts, and runs `validateProjectConfig`. It never overwrites `project.json`. The preview CLI loads the candidate separately. See [docs/preproduction.md](docs/preproduction.md).

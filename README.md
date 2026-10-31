@@ -27,6 +27,12 @@ It does not include any song, recording, lyrics, reference image, production sce
 - An authoritative sample-domain audio mix: master gain/fades/automation plus approved SFX, voiceover and ambience tracks, normalized to 44.1/48 kHz stereo PCM and encoded to AAC exactly once at mux time.
 - Frame-locked audio placement and frame-range audio slicing, including nonzero render subranges and non-integer frame/sample ratios.
 - Deterministic offline peak/RMS/onset cue analysis with explicit estimated provenance; it does not claim tempo, sections, lyrics or automatic music understanding.
+- A versioned constant-tempo beat-grid analyzer with ranked tempo candidates, phase alignment, confidence and explicit half/double/offbeat/tempo-change/insufficient-evidence handling, plus a reported frame-zero detection-domain boundary.
+- An explicit beat-grid approval record that keeps the estimated provenance and the reviewer's chosen interpretation, and is re-validated against the current grid on every load.
+- Editable manual BPM, beat-anchor, cut-cue and half-open section annotations; optional UTF-8 LRC or structured lyrics with frame mapping and section references.
+- A style-independent creative brief, deterministic director plan, frame-accurate storyboard, asset requirements manifest and revisioned approval workflow.
+- A separate approved-storyboard compiler that validates a candidate project without overwriting `project.json`, and blocks compilation when required local assets are missing.
+- A real synthetic storyboard preview rendered through the existing Remotion/audio engine.
 - Half-open integer frame ranges, binary-search shot resolution, and sampling after selection.
 - Renderers:
   - `pixel-canvas` — configurable internal resolution, nearest-neighbour display, hold-based sampling.
@@ -39,7 +45,7 @@ It does not include any song, recording, lyrics, reference image, production sce
 - Per-project staged Remotion entries and local bundles that never copy project scene source into this repository.
 - Local rendering with Remotion `renderFrames` plus system FFmpeg.
 - An offline cue report that never overwrites manually approved cue points.
-- Four seeded synthetic example projects, two synthetic media-project templates and three synthetic audio-project templates, engine tests and publication audits.
+- Four seeded synthetic example projects, two media-project templates, three audio-project templates and four preproduction-project templates, engine tests and publication audits.
 
 ## 3. Architecture overview
 
@@ -89,7 +95,7 @@ npm test
 
 `npm test` regenerates synthetic fixtures, compiles the engine and runs the test suite. Tests never require a private song or production asset. Media and multi-format audio probe tests create disposable synthetic files with FFmpeg and are skipped when FFmpeg/FFprobe are unavailable; the core WAV/PNG suite does not require FFmpeg.
 
-`npm run verify:modules` additionally requires a seeded external workspace and a usable browser; it bundles both module projects and renders real still evidence. `npm run media:seed` creates the Video/Hybrid synthetic projects in a disposable external workspace, and `npm run media:verify` renders their stills and complete short videos with FFprobe/audio checks. `npm run audio:seed` creates the three synthetic audio projects (MP3 master, FLAC + SFX/voice/AAC multitrack, and 44.1 kHz click/cue boundaries), and `npm run audio:verify` renders them and analyzes decoded output audio. CI provisions a pinned, checksum-verified Windows FFmpeg/FFprobe build under the runner temp directory, verifies the required `libx264`, `libmp3lame`, `aac` and `flac` encoders, and then runs media and audio acceptance unconditionally; provisioning or encoder failure fails the job rather than skipping acceptance. See `.github/workflows/engine-ci.yml`. The dependency advisory review is in [docs/dependency-security.md](docs/dependency-security.md).
+`npm run verify:modules` additionally requires a seeded external workspace and a usable browser; it bundles both module projects and renders real still evidence. `npm run media:seed` creates the Video/Hybrid synthetic projects in a disposable external workspace, and `npm run media:verify` renders their stills and complete short videos with FFprobe/audio checks. `npm run audio:seed` creates the three synthetic audio projects (MP3 master, FLAC + SFX/voice/AAC multitrack, and 44.1 kHz click/cue boundaries), and `npm run audio:verify` renders them and analyzes decoded output audio. `npm run preproduction:seed` creates the four music-aware planning projects, and `npm run preproduction:verify` plans, validates, approves, compiles and renders both the manual-timing and the approved beat-derived storyboard previews with decoded cut and audio checks. CI provisions a pinned, checksum-verified Windows FFmpeg/FFprobe build under the runner temp directory, verifies the required `libx264`, `libmp3lame`, `aac` and `flac` encoders, and then runs media, audio and preproduction acceptance unconditionally; provisioning or encoder failure fails the job rather than skipping acceptance. See `.github/workflows/engine-ci.yml`. The dependency advisory review is in [docs/dependency-security.md](docs/dependency-security.md).
 
 ## 7. Creating a synthetic local project
 
@@ -102,6 +108,8 @@ npm run media:seed
 npm run media:verify
 npm run audio:seed
 npm run audio:verify
+npm run preproduction:seed
+npm run preproduction:verify
 ```
 
 On PowerShell: `$env:MV_WORKSPACE_ROOT = 'C:\absolute\path\outside\this\repository'`.
@@ -334,7 +342,43 @@ This is a foundation for manual cue planning, not music understanding. It does n
 - If a track is rejected for source length, shorten its duration or in-point or provide a longer approved source. If the mix reports limiter gain, reduce source/track gain instead of relying on the limiter.
 - For preview/final checks, decode the actual output with FFmpeg and compare tone/onset timing; do not infer success from the presence of an AAC stream. `npm run audio:verify` performs this measurement for the three synthetic projects. In the 44.1 kHz boundary fixture, a coarse 10 ms analysis window starts before the pulse; the sample-level evidence separates that window start from the real leading edge and the 12 ms pulse center.
 
-## 14. Project-local scene modules
+## 14. Music-aware preproduction
+
+The preproduction layer is local and song-independent. It converts verified audio timing and explicit user creative intent into an editable production plan; it does not infer song meaning.
+
+```bash
+npm run preproduction -- analyze-beats --project synthetic-beat-demo
+npm run preproduction -- beat-grid-candidates --project synthetic-beat-demo
+npm run preproduction -- approve-beats --project synthetic-beat-demo \
+  --interpretation as-estimated --acknowledge-ambiguity --notes "Selected 120 BPM over the half-tempo reading."
+npm run preproduction -- validate --project synthetic-beat-demo
+npm run preproduction -- plan --project synthetic-beat-demo
+npm run preproduction -- approve-plan --project synthetic-beat-demo
+npm run preproduction -- storyboard --project synthetic-beat-demo
+npm run preproduction -- approve-storyboard --project synthetic-beat-demo
+npm run preproduction -- report-assets --project synthetic-beat-demo
+npm run preproduction -- compile --project synthetic-beat-demo
+npm run preproduction -- render-preview --project synthetic-beat-demo --frames 0-119
+```
+
+The beat grid is a separate versioned analyzer with ranked tempo candidates, phase selection, confidence and explicit ambiguity; candidate transients are never automatically approved beats, and a grid that starts at frame 0 is reported as outside the detection domain rather than invented. `approve-beats` is the only route from an estimate into timing: it records the measured provenance and the reviewer's chosen interpretation, and every later load re-validates that record against the current grid, so re-analysis invalidates a stale approval instead of quietly reusing it. Manual BPM/beat anchors/cut cues/sections are user-approved annotations and always take precedence; a high confidence score authorizes nothing on its own. Shot boundaries therefore carry one of `manual-bpm`, `manual-beat`, `manual-cut`, `section`, `approved-beat-grid`, `project-cue` or `lyric` — there is no unapproved beat source. Optional UTF-8 LRC or structured lyrics are validated for timing, UTF-8 text, frame mapping and section references; there is no transcription or web fetch.
+
+The creative brief is style-independent and covers concept, narrative mode, mood, style, ratio, palette, characters, setting, continuity, pacing, camera/transitions, references, exclusions, constraints, preferred renderers and required-asset briefs. The deterministic director plan and storyboard use approved sections/timing, optional lyrics, asset capability and explicit pacing constraints—not every transient becomes a cut.
+
+Outputs remain under `<project>/preproduction/`:
+
+- `beat-grid.json` (always `approval: "unapproved"`), `approved-beat-grid.json`, `annotations.json`, `creative-brief.json`;
+- optional `lyrics.lrc` or `lyrics.json`;
+- revisioned `approved-beat-grid-rNNN.json`, `director-plan.json` and `storyboard.json`;
+- `asset-requirements.json`;
+- `project-candidate.json` only when all requirements are approved;
+- `compile-report.json` / `missing-assets.json`.
+
+A storyboard with missing assets remains a valid production plan but cannot compile or render. The compiler validates a separate candidate project; `project.json` is not overwritten. The preview command loads that candidate through the normal isolated loader and renders an actual short MP4, so storyboard cuts determine the rendered shot selection.
+
+`npm run preproduction:seed` creates Project A (strong 120 BPM tempo with approved manual timing, real preview), Project A2 (90 BPM tempo with no manual timing at all, where the approved beat grid supplies every interior cut and the preview is rendered and decoded), Project B (weak/irregular rhythm with manual anchors) and Project C (synthetic lyrics, narrative brief and a deliberately missing image asset). `npm run preproduction:verify` exercises the full workflow for all four and writes external evidence reports, including matched/missed/extra beat metrics and the approval-to-render timing trace. See [docs/preproduction.md](docs/preproduction.md).
+
+## 15. Project-local scene modules
 
 A project can declare self-contained Canvas 2D modules under its own `scenes/` directory:
 
@@ -386,7 +430,7 @@ A matching hash proves byte identity, not benign behavior. Only run user-authore
 
 See `docs/project-config.md`, `docs/rendering.md` and `docs/workspace-safety.md` for the full contract, negative tests and remaining trust boundary.
 
-## 15. Third-party acknowledgments
+## 16. Third-party acknowledgments
 
 - [Remotion](https://www.remotion.dev/) — video framework. Remotion has its own license terms; review https://remotion.pro/license before commercial use.
 - [React](https://react.dev/) — MIT.

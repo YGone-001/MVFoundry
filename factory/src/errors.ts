@@ -53,3 +53,10 @@ export class SceneModuleError extends FactoryError {
     this.name = 'SceneModuleError';
   }
 }
+
+export class PreproductionError extends FactoryError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PreproductionError';
+  }
+}

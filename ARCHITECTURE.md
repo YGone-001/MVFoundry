@@ -16,6 +16,7 @@ factory/
       external/   project-local module contract, runtime binding and adapter
     media/        hashing, WAV/MP3/FLAC/M4A probing, normalization, video/PNG probes, timeline checks, staging
     audio/        deterministic multitrack PCM mixing, cue analysis, audio evidence measurement
+    preproduction/ beat grid, annotations, lyrics, brief, director plan, storyboard, asset manifest, compiler
     project/      loader, browser-safe snapshot, module loading and staged entry
     remotion/     MV-Factory composition, default demo and local project bundling
     audit/        read-only Git audit
@@ -45,6 +46,14 @@ external project.json + scenes/ + approved media
   -> Canvas path or shot-local React media Sequence
   -> renderFrames to project cache
   -> system FFmpeg mux from the PCM mix (or frame-range segment) to project renders/
+
+external project preproduction/
+  -> verified audio -> beat candidates + ambiguity evidence
+  -> approved manual timing/sections + optional local lyrics + creative brief
+  -> proposed director plan -> editable frame-accurate storyboard
+  -> asset requirements / missing-asset report
+  -> approved storyboard -> validated project-candidate.json
+  -> candidate loaded by the normal renderer -> storyboard-preview.mp4
 ```
 
 ## 4. Frame contract
@@ -112,7 +121,19 @@ Race limitation: Node.js path-based filesystem APIs do not provide an atomic ope
 - Outputs: H.264, yuv420p, BT.709 tags, exactly one AAC soundtrack from the authoritative mix.
 - Renders, frames, caches, normalized audio, mixes, generated media fixtures and reports never enter Git.
 
-## 9. Renderers and project scene modules
+## 9. Music-aware preproduction
+
+Preproduction is a local planning layer, not semantic music understanding and not a provider integration.
+
+- `factory/src/preproduction/beatGrid.ts` computes an energy-flux onset envelope, autocorrelation tempo candidates, phase alignment and frame-aligned candidate beats. It reports quality/confidence, half/double tempo ambiguity, offbeat activity, tempo-change suspicion, insufficient evidence and a frame-zero detection-domain boundary (a difference envelope has no predecessor window, so a t=0 onset is reported as undetected rather than invented). Constant tempo only. It also builds the approved record from one explicitly selected interpretation.
+- `validate.ts` enforces manual BPM/beat anchors/cut cues/sections, optional UTF-8 LRC or structured lyrics, and a style-independent creative brief. Manual approved timing takes precedence over estimates. `validateApprovedBeatGrid` re-checks a recorded approval against the grid currently on disk — algorithm version, master hash, candidate BPM, confidence, quality, ambiguity flags and the full candidate beat lists — so re-analysis invalidates a stale approval instead of silently reusing it.
+- `director.ts` deterministically combines approved sections/timing, an explicitly approved beat grid, optional lyrics, brief pacing constraints, renderer capabilities and asset needs into a proposed plan. Beat cuts are optional guidance, not every transient, and an estimate never reaches the planner without its approval record.
+- `storyboard.ts` maps the plan to contiguous half-open chapters/shots, references approved project cues/manual cuts/lyric lines, verifies that any `approved-beat-grid` shot cites a beat id from the plan's recorded approval, computes missing-asset state and a `renderReady` flag.
+- `compile.ts` refuses unapproved or incomplete storyboards, writes `missing-assets.json` for blocked plans, and otherwise writes a separate validated `project-candidate.json`. It never overwrites `project.json` automatically.
+- The CLI in `factory/scripts/preproduction.mjs` writes only under the selected external project via the central write boundary. Revisions are kept under `preproduction/revisions/`.
+- The preview command passes the candidate config through the normal loader/renderer, so approved storyboard cuts affect actual rendered output.
+
+## 10. Renderers and project scene modules
 
 | Renderer | Status | Notes |
 |---|---|---|
@@ -141,7 +162,7 @@ The generated entry calls `bindProjectSceneModules`, which validates the exporte
 - Verified bytes are re-hashed immediately before bundling, but the external workspace is not locked against concurrent local mutation.
 - Generated entry, module copies and bundles remain in the external project cache.
 
-## 10. Reproducibility and CI
+## 11. Reproducibility and CI
 
 - No unseeded randomness or wall-clock time in drawing. Project modules are given frame-derived values only, and the source policy rejects common clock, timer and randomness APIs.
 - Base WAV/PNG fixtures are generated deterministically by a committed pure-Node script; binaries are ignored by Git and base tests do not require FFmpeg. Media probe/render tests and media fixtures require FFmpeg/FFprobe and are skipped or reported NOT RUN when unavailable.
@@ -149,17 +170,22 @@ The generated entry calls `bindProjectSceneModules`, which validates the exporte
 - `verify:modules` bundles both module projects and renders boundary/hold stills from the actual Remotion pipeline, writing evidence under each external project's `reports/` and `renders/`.
 - `media:seed` generates synthetic video/PNG/WAV media inside a disposable external workspace; `media:verify` renders media stills and complete videos, checks decoded source colors, cuts, PNG alpha, overlay motion, media metadata and soundtrack-only audio, and writes external reports.
 - `audio:seed` generates synthetic WAV/MP3/FLAC/M4A sources and audio-project manifests in a disposable external workspace; `audio:verify` renders MP3-master, multitrack and 44.1 kHz boundary projects, then analyzes decoded output for format metadata, duration, onsets, gain, fades, ducking, track intervals, muted embedded video audio, nonzero subrange alignment and source-hash preservation.
+- `preproduction:seed` generates deterministic strong-tempo, approved-beat-grid, uncertain-rhythm and lyrics/missing-asset projects externally. `preproduction:verify` runs the actual CLI workflow, records matched/missed/extra beat metrics, blocks planning without an approval, requires explicit acknowledgement of a flagged tempo ambiguity, approves plans, storyboards and one beat-grid candidate, compiles the candidates, renders two real previews (manual-timing and beat-derived), checks decoded cuts, decoded soundtrack tempo, the config actually used by the render, source hashes and approval/revision immutability, verifies manual timing precedence for the strong-tempo project, manual-anchor fallback for the uncertain project, and blocks the lyrics project on its missing asset.
 - Unit tests cover audio frame/sample mapping, WAV parsing, format probing, normalization determinism, track validation, gain/fade/automation/limiter behavior, mix slicing, cue analysis, loader source-range checks and evidence measurement. FFmpeg-dependent tests skip only when the host lacks FFmpeg.
-- GitHub Actions provisions the pinned FFmpeg/FFprobe build before typecheck/tests, verifies the required `libx264`, `libmp3lame`, `aac` and `flac` encoders, validates Windows with Node 20, seeds an external synthetic workspace, ensures a browser, runs module bundles and still renders, and runs media and audio seed/verify unconditionally plus publication and Git media audits. Provisioning/encoder failure or any verification failure fails the job; audio acceptance has no conditional-skip path. No artifacts or production media are uploaded.
+- GitHub Actions provisions the pinned FFmpeg/FFprobe build before typecheck/tests, verifies the required `libx264`, `libmp3lame`, `aac` and `flac` encoders, validates Windows with Node 20, seeds an external synthetic workspace, ensures a browser, runs module bundles and still renders, and runs media, audio and preproduction seed/verify unconditionally plus publication and Git media audits. Provisioning/encoder failure or any verification failure fails the job; media/audio/preproduction acceptance has no conditional-skip path. No artifacts or production media are uploaded.
 - Render metadata must be verified with actual output, not source inference.
 
-## 11. Known boundaries
+## 12. Known boundaries
 
 - Video/Hybrid support approved local MP4/H.264 constant-frame-rate, zero-rotation sources only. VFR and rotated sources require preprocessing.
 - `endBehavior` is `reject` only; freeze/hold/end-of-file policies are not implemented.
 - Source in-points must align to output-frame boundaries. Source FPS may differ from output FPS, but exact source-frame selection is not claimed for unsupported VFR material.
 - Embedded video audio is muted; the engine mix (master plus explicit tracks) is the only audio authority.
 - Audio mixing supports gain, linear fades, explicit automation and manual ducking envelopes. It does not provide compression, EQ, reverb, automatic ducking, loudness targets or AI music understanding.
+- Beat-grid analysis assumes constant tempo and reports ambiguity rather than resolving it. It does not infer meter, downbeats, sections, BPM changes, emotion or lyrics.
+- Preproduction lyrics are user-supplied and timed only; no transcription, translation or web fetch is implemented.
+- Generated plans use built-in Canvas renderer families in the synthetic projects. Video/Hybrid planning still needs a user-authored typed media shot and approved local sources; the compiler preserves existing renderer contracts but does not invent media configuration.
+- Preproduction plans and storyboards are editable JSON; validation is structural and timing-focused, not semantic direction review.
 - MP3/FLAC/AAC ingestion depends on the local FFmpeg/FFprobe build and its decoders. Unsupported codecs, multichannel sources, unexpected streams and unsafe or ambiguous containers fail closed.
 - Preview and final output use different playback encodings (PCM WAV vs AAC). Semantic alignment is verified; sample-identical preview/final playback is not claimed.
 - Hybrid layers require 8-bit alpha PNGs and one built-in Canvas overlay; no arbitrary scene graph is provided.

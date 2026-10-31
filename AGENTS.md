@@ -16,7 +16,7 @@ MVFoundry is a local-first, song-independent AI music video production framework
 
 1. Actual source and observed command output.
 2. `README.md`, `ARCHITECTURE.md`, `factory/` and its tests.
-3. `docs/project-config.md`, `docs/official-skills.md`, `docs/workspace-safety.md`, `docs/rendering.md`.
+3. `docs/project-config.md`, `docs/official-skills.md`, `docs/workspace-safety.md`, `docs/rendering.md`, `docs/preproduction.md`.
 4. The external project's `project.json`, approved assets, hashes and rights records.
 5. The five active Skills in `.agents/skills/`.
 
@@ -88,6 +88,20 @@ Do not treat plans, prior reports or user summaries as proof of the current file
 - Normalized audio, mixes, analyses and evidence stay under the external project cache/reports. Source audio is immutable. Never commit audio, stems, mixes or generated media.
 - Preview uses the generated PCM mix via Remotion `<Audio>`; final output uses AAC encoding of the same mix. Do not claim sample-identical preview/final playback. Verify actual decoded output, not the presence of an audio stream.
 
+### Preproduction planning
+
+- The beat-grid analyzer is separate from the P1-D onset report. Candidate beats, tempo and phase are estimated evidence, never approved timing. Report half/double ambiguity, offbeat activity, tempo-change suspicion, insufficient evidence and the frame-zero detection-domain boundary explicitly. Never add a frame-zero beat to make a check pass; a start anchor must come from an approved manual annotation.
+- An estimated beat grid reaches director timing only through an explicit `approve-beats` record that keeps the measured provenance and the reviewer's chosen interpretation. That record is re-validated against the current grid on every load, so re-analysis makes it stale instead of silently reusing it. A high confidence score alone authorizes nothing, and an ambiguous grid cannot be approved without acknowledging the competing interpretation.
+- Approved manual BPM, beat anchors, cut cues and sections take precedence over any approved grid. Reanalysis must never overwrite user-approved annotations, an approved director plan, an approved storyboard or an approved beat grid.
+- Manual BPM/anchors/cues/sections require `source: "user"` and explicit approval. Use half-open frame ranges and validate frame/time agreement, gaps, overlaps and duration bounds.
+- Optional lyrics must be user-supplied local UTF-8 LRC or structured JSON. Never transcribe, fetch, infer or upload lyrics. Validate timestamps, frame mapping, section references and duration; preserve text and approved timing.
+- The creative brief is user-authored style-independent intent, not music evidence. Do not hardcode a song, style, ratio, palette, language, section count or shot count.
+- Director plans must use explicit approved timing/creative inputs and label every shot boundary with one of `manual-bpm`, `manual-beat`, `manual-cut`, `section`, `approved-beat-grid`, `project-cue` or `lyric`; there is no unapproved beat source. Never turn every transient into a cut. Preserve proposed/approved/rejected revisions; do not overwrite an approved plan with reanalysis.
+- Storyboards must cover the complete duration with unique, contiguous half-open shots; reference approved cues/assets/lyrics; verify that any `approved-beat-grid` shot cites a beat recorded in the plan's approval; and expose missing requirements. A requirement is not an asset.
+- Missing assets must block compilation. Write a separate candidate configuration and validate it with the existing project validator; never overwrite `project.json` automatically or invent asset IDs.
+- Storyboard previews must load the compiled candidate through the normal loader so the rendered shot selection actually comes from the approved storyboard. All generated plans, lyrics, assets, previews and reports stay external to Git.
+- No provider calls, image/video generation, transcription or real-song migration are authorized in this phase.
+
 ### Timeline and rendering
 
 - Integer output frames are the canonical editing clock; scene ranges are half-open `[startFrame, endFrame)`.
@@ -124,6 +138,12 @@ npm run media:seed
 npm run media:verify
 npm run audio:seed
 npm run audio:verify
+npm run preproduction:seed
+npm run preproduction:verify
+npm run preproduction -- analyze-beats --project synthetic-beat-demo
+npm run preproduction -- beat-grid-candidates --project synthetic-beat-demo
+npm run preproduction -- approve-beats --project synthetic-beat-demo --interpretation as-estimated --acknowledge-ambiguity --notes "<review>"
+npm run preproduction -- plan --project synthetic-beat-demo
 npm run render:project -- --project synthetic-pixel-demo --mode video --frames 0-23
 npm run render:project -- --project synthetic-module-pixel-demo --mode video --frames 0-47
 npm run verify:modules
@@ -135,11 +155,11 @@ Set `MV_WORKSPACE_ROOT` to a path outside this repository. Set `REMOTION_BROWSER
 
 ## Skill routing
 
-- Song analysis, treatment, chapters, cues, shots → `music-video-director`.
-- Style profile, palette, character/environment continuity → `visual-identity-continuity`.
-- AI shot contracts, keyframes, hashes, provider authorization → `ai-shot-production`.
-- Frame clock, registry, renderers, local media, Remotion composition → `remotion-mv-compositor`.
-- Acceptance, audits, PASS/FAIL/BLOCKED/NOT RUN → `music-video-quality-gate`.
+- Song analysis, beat-grid evidence, annotations, lyrics, treatment, director plans, storyboards → `music-video-director`.
+- Style profile, creative brief, palette, character/environment continuity, asset direction → `visual-identity-continuity`.
+- AI shot contracts, asset requirement manifests, keyframes, hashes, provider authorization → `ai-shot-production`.
+- Frame clock, registry, renderers, audio mixing, storyboard candidate compilation/preview → `remotion-mv-compositor`.
+- Acceptance, beat/timing/storyboard/asset/compile/preview audits, PASS/FAIL/BLOCKED/NOT RUN → `music-video-quality-gate`.
 - Remotion API or CLI questions → official `remotion-*` Skills.
 
 ## Agent startup
@@ -148,4 +168,4 @@ Agents that do not auto-discover `.agents/skills` must read this file and the fi
 
 ## Scope boundary
 
-The reusable engine supports declarative renderers, trusted project-local Canvas 2D scene modules, local Video/Hybrid media composition, multi-format audio ingestion, frame-locked multitrack mixing and deterministic cue analysis. It does not start a music-video production, generate media with AI, migrate a private production, call providers, implement automatic music understanding or publish production scenes. Stop before unauthorized provider, publication or production work.
+The reusable engine supports declarative renderers, trusted project-local Canvas 2D scene modules, local Video/Hybrid media composition, multi-format audio ingestion, frame-locked multitrack mixing, deterministic cue analysis and a song-independent beat/section/lyrics/director/storyboard preproduction workflow. It does not start a real music-video production, generate media with AI, transcribe or fetch lyrics, migrate a private production, call providers, implement semantic music understanding or publish production scenes. Stop before unauthorized provider, publication or production work.

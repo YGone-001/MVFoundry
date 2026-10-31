@@ -1,6 +1,6 @@
 ---
 name: visual-identity-continuity
-description: Establish and audit a project-specific visual identity for any style in the AI Music Video Factory. Use for style profiles, palettes, character and environment contracts, reference approval, and cross-shot continuity in pixel, anime, filmic, illustration, 3D, abstract or hybrid work.
+description: Establish and audit a project-specific visual identity for any style in the AI Music Video Factory. Use for style profiles, palettes, character and environment contracts, creative briefs, reference approval, asset direction and cross-shot continuity in pixel, anime, filmic, illustration, 3D, abstract or hybrid work.
 ---
 
 # Visual Identity Continuity
@@ -69,3 +69,11 @@ Creates a per-project visual contract. It supports many styles and does not impo
 - Cross-shot drift: report the exact shots and anchors, then require a correction.
 - Style rules conflict: prefer the project contract and escalate; do not silently mix styles.
 - Any visual claim without inspected output is marked NOT RUN.
+
+## Preproduction brief and continuity
+
+- Treat the creative brief as user-authored intent, not music evidence. Validate visual style, aspect ratio, palette, characters, setting, continuity rules, references, exclusions and production constraints.
+- Keep the brief style-independent: pixel-art, live-action, anime, abstract motion graphics or mixed styles must be expressible without engine changes.
+- Carry character/environment references and continuity rules into the director plan and storyboard; mark assumptions as editable suggestions.
+- A required visual asset is a production requirement, not an approved asset. Track missing status and do not let a missing image/video/layer become render-ready.
+- Never infer a palette, character or setting from audio or lyrics unless the user explicitly supplies that direction.

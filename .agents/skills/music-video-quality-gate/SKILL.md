@@ -1,6 +1,6 @@
 ---
 name: music-video-quality-gate
-description: Evidence-based acceptance for the AI Music Video Factory. Use before reporting completion, after timing, renderer, audio, workspace, skill or render changes, or when deciding PASS, FAIL, BLOCKED or NOT RUN for any local music-video project.
+description: Evidence-based acceptance for the AI Music Video Factory. Use before reporting completion, after timing, renderer, audio, preproduction, workspace, skill or render changes, or when deciding PASS, FAIL, BLOCKED or NOT RUN for any local music-video project.
 ---
 
 # Music Video Quality Gate
@@ -109,3 +109,17 @@ Independent verification for the factory and its local projects. It observes act
 - Any request to hide a failure, fabricate evidence or skip a gate: refuse.
 - If publication was not authorized, mark remote CI evidence NOT RUN and leave changes local.
 - Stop after the report; do not start the next phase without authorization.
+
+## Preproduction acceptance
+
+- Treat candidate tempo/beat grids as estimated (`status: "estimated"`, `approval: "unapproved"`). Verify confidence, half/double ambiguity, offbeat activity, tempo-change suspicion, insufficient-evidence behavior and the frame-zero detection-domain boundary against synthetic ground truth.
+- Report beat accuracy as separate tempo error, per-beat timing error in frames and milliseconds, matched count, missed ground-truth beats and extra detections. A maximum matched-error figure alone is not beat-recovery evidence, and one frame at 30 fps is 33.3 ms.
+- Verify an estimated grid cannot reach planning without an explicit approval: planning must fail closed with `No approved timing source`, an ambiguous grid must be rejected without acknowledgement, and a re-analysed grid must invalidate the prior approval rather than keep it live.
+- Verify manual approved BPM/anchors/cut cues/sections take precedence over an approved grid and are never overwritten by reanalysis.
+- Validate optional LRC/structured lyrics for UTF-8, timestamps, frame mapping, duration and section references. Confirm no transcription or web fetch.
+- Verify the creative brief is style-independent, the plan/storyboard cover the full duration, and every cut has an explicit timing source from the approved set; a shot claiming `approved-beat-grid` must cite a beat id recorded in the plan's approval.
+- Verify the asset requirements manifest distinguishes needed/in-production/available/approved/rejected and that missing assets block compilation with no candidate.
+- Verify the approved candidate preserves master audio/hash, fps, duration, cues, audio tracks and renderer contracts; `project.json` must remain unchanged.
+- Verify approval and revision integrity: an approved plan or active approval is replaced only by an explicit `--new-revision`, earlier revisions stay on disk, and the compiled candidate plus rendered preview are unchanged by those operations.
+- Decode the actual storyboard preview: frame cuts, output metadata, one final audio stream, beat/cue alignment, the candidate config actually used by the render and source hashes. JSON-only evidence is insufficient. A beat-derived preview is required in addition to a manual-timing preview when the approval path is claimed.
+- Report skipped preproduction preview/audio checks as NOT RUN, never PASS.
