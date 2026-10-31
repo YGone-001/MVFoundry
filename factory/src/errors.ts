@@ -46,3 +46,10 @@ export class SceneRenderError extends FactoryError {
     this.name = 'SceneRenderError';
   }
 }
+
+export class SceneModuleError extends FactoryError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SceneModuleError';
+  }
+}

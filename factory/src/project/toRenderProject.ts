@@ -39,6 +39,12 @@ export const toRenderProject = (
     narrative: {...config.narrative},
     cues: config.cues.map((cue) => ({...cue})),
     chapters,
+    sceneModules: config.sceneModules.map((module) => ({
+      id: module.id,
+      contractVersion: module.contractVersion,
+      moduleType: module.moduleType,
+      sha256: module.sha256,
+    })),
     render: {...config.render},
     audio: {
       durationSeconds: config.audio.durationSeconds,

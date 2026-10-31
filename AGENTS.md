@@ -42,12 +42,26 @@ Do not treat plans, prior reports or user summaries as proof of the current file
 
 ### Safe filesystem writes
 
-- All project writes go through `factory/src/workspace/writeBoundary.ts`; do not add ad-hoc `rmSync`, `writeFileSync` or `copyFileSync` paths that bypass it.
+- All engine-authored project writes go through `factory/src/workspace/writeBoundary.ts`; do not add ad-hoc `rmSync`, `writeFileSync` or `copyFileSync` paths that bypass it.
+- The trusted Remotion/Webpack bundler writes its own output tree into a pre-validated, freshly created `<project>/cache/engine-bundle/bundle` directory; project webpack configuration is never loaded. Do not describe this trusted-tool output as passing per-file boundary checks.
 - Render output defaults to `<project>/renders/`. `--out` accepts a single filename relative to renders or an absolute direct child of renders; reject traversal, other projects, the engine repository and linked destinations before writing.
 - Staging may write only under `<project>/cache/render-public`; cleanup may recreate only strict descendants of `<project>/cache`.
-- Never delete the project cache root, the project root, source audio or approved source assets.
+- Never delete the project cache root, the project root, source audio, approved source assets or declared scene-module sources.
 - Validate existing ancestors and destinations; reject symlinks and Windows junctions. Ordinary Node.js filesystem APIs cannot guarantee protection against concurrent malicious mutation; do not claim race-free security.
 - Test negative paths and verify no output was written.
+
+### External scene modules
+
+- Project-local scene modules are executable code. Only explicitly declared, user-authored or user-approved local modules may be loaded.
+- A module path must be project-relative, under `scenes/`, canonicalized inside the project and free of symlinks or Windows junctions.
+- Verify the declared SHA256 against the exact bytes before bundling. A hash proves identity, not benign behavior.
+- `trust` must be exactly `user-authored-approved`; missing, duplicate, unknown-type, unapproved or cross-project modules fail closed.
+- Never import or execute project modules in the Node host. Node performs path, hash and static source-policy checks only.
+- Reject imports, re-exports, dynamic code, network APIs or URLs, DOM/environment access, timers, clocks and randomness in module source. This is not a sandbox; do not claim OS or browser-network isolation.
+- Generate the entry, verified module copies and webpack output only under `<project>/cache/engine-bundle/`. Never copy scene source into this repository or another project's cache.
+- Build a per-project bundle with explicit static imports and a controlled engine alias. Do not use `eval`, dynamic unverified imports, arbitrary `require()` paths or a global mutable scene registry.
+- Bind module identity, contract version, type, parameter schema and approved asset dependencies at bundle load. Unknown parameters or missing assets stop rendering.
+- Do not serialize module functions through Remotion `inputProps`.
 
 ### Timeline and rendering
 
@@ -82,11 +96,13 @@ npm test
 npm run compositions
 npm run seed:examples
 npm run render:project -- --project synthetic-pixel-demo --mode video --frames 0-23
+npm run render:project -- --project synthetic-module-pixel-demo --mode video --frames 0-47
+npm run verify:modules
 npm run audit:git
 npm run audit:publication
 ```
 
-Set `MV_WORKSPACE_ROOT` to a path outside this repository. Set `REMOTION_BROWSER_EXECUTABLE` or `CHROME_PATH` when Remotion cannot locate a browser.
+Set `MV_WORKSPACE_ROOT` to a path outside this repository. Set `REMOTION_BROWSER_EXECUTABLE` or `CHROME_PATH` when Remotion cannot locate a browser. `npx remotion browser ensure` installs a managed browser for CI or a fresh host.
 
 ## Skill routing
 
@@ -103,4 +119,4 @@ Agents that do not auto-discover `.agents/skills` must read this file and the fi
 
 ## Scope boundary
 
-P0-G publishes the reusable engine only. It does not start a music-video production, generate media, migrate a private production, or call providers.
+The reusable engine supports declarative renderers and trusted project-local Canvas 2D scene modules. It does not start a music-video production, generate media, migrate a private production, call providers, implement video/hybrid renderers or publish production scenes. Stop before unauthorized provider, publication or production work.

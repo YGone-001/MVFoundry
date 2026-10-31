@@ -9,11 +9,14 @@ on:
 permissions:
   contents: read
 
+env:
+  MV_WORKSPACE_ROOT: ${{ runner.temp }}/mv-workspaces
+
 jobs:
   windows:
     name: Windows Node 20 filesystem security
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,6 +31,29 @@ jobs:
         run: npm run typecheck
       - name: Engine tests including junction behavior
         run: npm test
+      - name: Seed synthetic external workspace
+        run: npm run seed:examples
+      - name: Ensure Remotion browser
+        run: npx remotion browser ensure
+      - name: Module bundle and still render evidence
+        run: npm run verify:modules
+      - name: Check FFmpeg availability
+        id: ffmpeg
+        shell: pwsh
+        run: |
+          if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
+            "available=true" >> $env:GITHUB_OUTPUT
+          } else {
+            "available=false" >> $env:GITHUB_OUTPUT
+            Write-Output "NOT RUN: system FFmpeg is unavailable; short video encode skipped."
+          }
+      - name: Short synthetic video render
+        if: steps.ffmpeg.outputs.available == 'true'
+        run: npm run render:project -- --project synthetic-module-pixel-demo --mode video --frames 0-11
+      - name: Record video render limitation
+        if: steps.ffmpeg.outputs.available != 'true'
+        run: |
+          Write-Output "NOT RUN: system FFmpeg is unavailable; still renders completed above."
       - name: Publication audit
         run: npm run audit:publication
       - name: Git media audit

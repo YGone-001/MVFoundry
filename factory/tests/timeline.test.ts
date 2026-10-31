@@ -82,6 +82,37 @@ test('sampling uses exact rational math for non-integer ratios', () => {
   assert.throws(() => computeAnimationTick(-1, 24, 12), TimelineError);
 });
 
+test('module sampling is exact at odd shot starts and non-integer ratios', () => {
+  const start = buildSceneFrameInfo(7, 7, 30, 12, 60);
+  assert.equal(start.localFrame, 0);
+  assert.equal(start.localTime, 0);
+  assert.equal(start.animationTick, 0);
+
+  const frame8 = buildSceneFrameInfo(8, 7, 30, 12, 60);
+  assert.equal(frame8.localFrame, 1);
+  assert.equal(frame8.animationTick, 0);
+  const frame10 = buildSceneFrameInfo(10, 7, 30, 12, 60);
+  assert.equal(frame10.localFrame, 3);
+  assert.equal(frame10.animationTick, 1);
+  const frame18 = buildSceneFrameInfo(18, 7, 30, 12, 60);
+  assert.equal(frame18.localFrame, 11);
+  assert.equal(frame18.animationTick, 4);
+  const frame19 = buildSceneFrameInfo(19, 7, 30, 12, 60);
+  assert.equal(frame19.localFrame, 12);
+  assert.equal(frame19.animationTick, 4);
+  const frame20 = buildSceneFrameInfo(20, 7, 30, 12, 60);
+  assert.equal(frame20.localFrame, 13);
+  assert.equal(frame20.animationTick, 5);
+  assert.equal(frame18.localTime, 11 / 30);
+  assert.equal(frame18.animationTime, 4 / 12);
+
+  const oddCut = buildSceneFrameInfo(25, 25, 24, 12, 48);
+  assert.equal(oddCut.localFrame, 0);
+  assert.equal(oddCut.animationTick, 0);
+  const beforeOddCut = buildSceneFrameInfo(24, 0, 24, 12, 48);
+  assert.equal(beforeOddCut.animationTick, 12);
+});
+
 test('audio duration policies and frame rounding are explicit', () => {
   assert.equal(durationFramesFromSeconds(2, 24, 'round'), 48);
   assert.equal(durationFramesFromSeconds(1.49, 24, 'floor'), 35);

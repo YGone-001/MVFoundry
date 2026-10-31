@@ -10,6 +10,7 @@ import {resolveShots, assertShotCoverage} from '../timeline/resolver';
 import {DEFAULT_SCENE_REGISTRY} from '../scenes/registry';
 import type {SceneRegistry} from '../scenes/types';
 import {toRenderProject} from '../project/toRenderProject';
+import {loadProjectSceneModules} from '../project/sceneModules';
 import {
   assertProjectId,
   getWorkspaceRoot,
@@ -61,6 +62,10 @@ export const loadProject = (
       `project.json declares "${config.projectId}" but was loaded as "${projectId}"`,
     );
   }
+
+  const sceneModules = loadProjectSceneModules(projectDir, config.sceneModules, {
+    engineRoot: options.engineRoot,
+  });
 
   const audioPath = resolveProjectRelativePath(projectDir, config.audio.path, {
     engineRoot: options.engineRoot,
@@ -118,6 +123,7 @@ export const loadProject = (
     durationInFrames,
     shots,
     assets,
+    sceneModules,
     renderProject: toRenderProject(config, durationInFrames),
   };
 };

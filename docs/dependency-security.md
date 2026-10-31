@@ -45,6 +45,10 @@ No direct dependency on Zod exists. Remotion 4.0.539 pins `zod` to exactly `4.5.
 
 Decision: **accept and track** the development/build-time advisory, do not suppress it, and do not force a dependency change. Revisit in a dedicated Remotion upgrade phase with full test evidence.
 
+## P1-B dependency impact
+
+External scene module loading introduces no new runtime or development dependencies. It uses the existing TypeScript compiler for static source analysis, the existing Remotion webpack bundler for the staged entry and the existing React/Remotion stack for rendering. The dependency entries in `package.json` and `package-lock.json` are unchanged by this feature; the advisory set above remains visible and unresolved.
+
 ## Verification
 
 - No `npm audit fix` or `--force` was run.

@@ -64,6 +64,7 @@ export const DEFAULT_RENDER_PROJECT: RenderProjectSnapshot = {
     {id: 'CUE-03', frame: 48, timeSeconds: 2, source: 'synthetic', label: 'end'},
   ],
   chapters: [chapterA, chapterB],
+  sceneModules: [],
   render: {
     codec: 'h264',
     pixelFormat: 'yuv420p',

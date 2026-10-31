@@ -39,8 +39,9 @@ export MV_WORKSPACE_ROOT=/absolute/path/outside/this/repository/MV-Workspaces
   assets/images/
   assets/video/
   assets/layers/
-  scenes/
+  scenes/          # declared trusted Canvas 2D modules
   cache/
+    engine-bundle/ # generated entry, verified module copies, webpack output
   renders/
   reports/
 ```
@@ -49,18 +50,37 @@ All song-specific content belongs here, never in the engine repository.
 
 ## Central write boundary
 
-Every project write goes through `factory/src/workspace/writeBoundary.ts`:
+Every engine-authored project write goes through `factory/src/workspace/writeBoundary.ts`:
 
 - authorized root: the canonical project directory;
 - cache writes: only inside `<project>/cache`;
 - render writes: only inside `<project>/renders`;
-- source audio and approved asset files cannot be overwritten;
+- source audio, approved asset files and declared scene-module sources cannot be overwritten;
 - existing ancestors and the destination are checked for traversal, symlinks and Windows junctions;
 - destinations that do not exist yet are resolved under the canonical root;
 - engine-repository paths and other projects are rejected;
 - validation failure is fatal.
 
+The local Remotion/Webpack bundler writes its own generated output tree directly into the pre-validated `<project>/cache/engine-bundle/bundle` directory. That directory is created through the boundary, is a strict cache descendant and starts empty; the trusted bundler's individual output files are not passed through `assertSafePath`. The generated entry and verified module copies do pass through the boundary. Do not treat the bundler as a security boundary for arbitrary project-controlled webpack configuration; MVFoundry does not load project webpack configuration.
+
 Ordinary Node.js filesystem APIs do not provide atomic `openat`-style guarantees. A concurrent attacker that can change the filesystem between validation and write could race the boundary. This limitation is explicit; the engine does not claim race-free protection.
+
+## External scene modules
+
+Project-local scene modules are executable code and follow a stricter contract:
+
+- Paths must be project-relative, under `scenes/`, end in `.ts` or `.tsx` and have no empty, current or parent segments.
+- Canonical resolution must remain inside the project and outside the engine repository.
+- Every component of the path is checked with `lstat`; symlinks and Windows junctions are rejected even when they point inside the project.
+- The declared SHA256 must match the exact bytes before the module is staged for bundling.
+- `trust` must be exactly `user-authored-approved`; duplicate IDs, unknown module types, missing files and unapproved modules fail closed.
+- The source policy rejects imports, re-exports, dynamic import, `require`, string-constructed functions, network/data URL literals, DOM access, browser storage, environment access, timers, clocks and `Math.random`.
+- Verified bytes are copied to `<project>/cache/engine-bundle/modules/`; the generated entry, bundle and public copy remain under `<project>/cache/engine-bundle/`.
+- The original module file is protected by the write boundary and cannot be overwritten by render, staging or cache operations.
+
+The static policy is a rejection policy, not a sandbox. It cannot prove arbitrary TypeScript is benign, and no OS or browser-network isolation is implemented. Importing the verified module executes its top-level code in the browser when the bundle loads; runtime identity and parameter checks occur after import. Only run trusted user-authored or explicitly approved local modules; never load scene code from a manifest-supplied remote source. The staged copy is re-hashed immediately before bundling, but the workspace is not locked against concurrent local mutation.
+
+At bundle load, module ID, contract version, module type, render function, parameter schema and asset dependencies are validated again. Unknown shot parameters, missing required parameters, unstaged assets and undeclared module renderers stop the render.
 
 ## Render output overrides
 
@@ -88,6 +108,9 @@ The engine tests cover:
 - missing `project.json`;
 - junction escapes to the repository and to an outside directory;
 - manifest path traversal, absolute paths and link escapes;
+- scene-module traversal, absolute paths, missing files, invalid hashes, unapproved trust, duplicate IDs, unknown types, linked paths and cross-project junctions;
+- module source imports, network URLs, DOM/environment access, timers, randomness and dynamic code;
+- module identity, parameter schema and asset-dependency failures at bundle load;
 - output overrides outside renders, traversal, other projects and engine paths;
 - linked render destinations and cache cleanup targets;
 - staging links and source preservation;

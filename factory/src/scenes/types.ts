@@ -16,6 +16,7 @@ export type SceneRenderContext = {
 
 export type SceneRenderer = {
   kind: string;
+  pixelated?: boolean;
   canvasSize: (project: RenderProjectSnapshot, shot: RenderProjectShot) => CanvasSize;
   samplingFps: (project: RenderProjectSnapshot, shot: RenderProjectShot) => number;
   render: (ctx: CanvasRenderingContext2D, context: SceneRenderContext) => void;

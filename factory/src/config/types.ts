@@ -65,6 +65,7 @@ export type Shot = {
   endFrame: number;
   renderer: string;
   params: SceneParams;
+  moduleParams?: SceneModuleParams;
 };
 
 export type Chapter = {
@@ -77,6 +78,34 @@ export type Chapter = {
 
 export type ProjectAssetKind = 'image' | 'video' | 'layer' | 'audio-reference';
 export type AssetApproval = 'approved' | 'pending' | 'rejected' | 'not_present';
+
+export type ProjectSceneModuleType = 'canvas2d';
+export type SceneModuleTrust = 'user-authored-approved';
+export type SceneModuleCanvasConfig =
+  | {mode: 'output'}
+  | {mode: 'project-pixel'}
+  | {mode: 'custom'; width: number; height: number};
+export type SceneModuleSampling = number | 'output' | 'project-pixel';
+export type SceneModuleParams = Record<string, string | number | boolean>;
+
+export type SceneModuleConfig = {
+  id: string;
+  path: string;
+  moduleType: ProjectSceneModuleType;
+  contractVersion: 1;
+  sha256: string;
+  trust: SceneModuleTrust;
+  canvas: SceneModuleCanvasConfig;
+  samplingFps: SceneModuleSampling;
+  pixelated: boolean;
+  label?: string;
+  description?: string;
+};
+
+export type RenderProjectSceneModule = Pick<
+  SceneModuleConfig,
+  'id' | 'contractVersion' | 'moduleType' | 'sha256'
+>;
 
 export type ProjectAsset = {
   id: string;
@@ -112,6 +141,7 @@ export type ProjectConfig = {
   output: OutputConfig;
   cues: Cue[];
   chapters: Chapter[];
+  sceneModules: SceneModuleConfig[];
   assets: ProjectAsset[];
   permissions: PermissionsConfig;
   render: RenderConfig;
@@ -152,6 +182,7 @@ export type RenderProjectSnapshot = {
   narrative: NarrativeConfig;
   cues: RenderProjectCue[];
   chapters: RenderProjectChapter[];
+  sceneModules: RenderProjectSceneModule[];
   render: RenderConfig;
   audio: {
     durationSeconds: number;
@@ -175,6 +206,13 @@ export type LoadedAsset = ProjectAsset & {
   hashVerified: boolean;
 };
 
+export type LoadedSceneModule = SceneModuleConfig & {
+  absolutePath: string;
+  computedSha256: string;
+  sourceText: string;
+  sourceBytes: Uint8Array;
+};
+
 export type LoadedProject = {
   config: ProjectConfig;
   workspaceRoot: string;
@@ -184,5 +222,6 @@ export type LoadedProject = {
   durationInFrames: number;
   shots: ResolvedShot[];
   assets: LoadedAsset[];
+  sceneModules: LoadedSceneModule[];
   renderProject: RenderProjectSnapshot;
 };

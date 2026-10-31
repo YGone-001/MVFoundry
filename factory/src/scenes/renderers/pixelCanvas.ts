@@ -67,6 +67,7 @@ const renderPixel = (
 
 export const pixelCanvasRenderer: SceneRenderer = {
   kind: 'pixel-canvas',
+  pixelated: true,
   canvasSize,
   samplingFps: (project) => project.visual.pixel?.samplingFps ?? project.output.fps,
   render: (ctx, context) => {

@@ -1,5 +1,7 @@
 import {ConfigValidationError} from '../errors';
 import {durationFramesFromSeconds, DURATION_POLICIES} from './duration';
+import {parseSceneModules} from './sceneModules';
+import {PROJECT_SCENE_RENDERER_PREFIX} from '../scenes/external/constants';
 import type {
   AssetApproval,
   Chapter,
@@ -9,6 +11,7 @@ import type {
   ProjectAsset,
   ProjectAssetKind,
   ProjectConfig,
+  SceneModuleParams,
   SceneParams,
   Shot,
   VisualConfig,
@@ -105,6 +108,35 @@ const validateParams = (value: unknown, field: string): SceneParams => {
   return result;
 };
 
+const MODULE_PARAM_KEY = /^[A-Za-z][A-Za-z0-9_]{0,31}$/;
+
+const validateModuleParams = (
+  value: unknown,
+  field: string,
+): SceneModuleParams | undefined => {
+  if (value === undefined) return undefined;
+  const params = record(value, field);
+  const keys = Object.keys(params);
+  if (keys.length > 32) fail(`${field} must contain at most 32 keys`);
+  const result: SceneModuleParams = {};
+  for (const key of keys.sort()) {
+    if (!MODULE_PARAM_KEY.test(key)) fail(`${field}.${key} is not a valid parameter name`);
+    const item = params[key];
+    if (typeof item === 'string') {
+      if (item.length > 1000) fail(`${field}.${key} string is too long`);
+      result[key] = item;
+    } else if (typeof item === 'number') {
+      if (!Number.isFinite(item)) fail(`${field}.${key} must be finite`);
+      result[key] = item;
+    } else if (typeof item === 'boolean') {
+      result[key] = item;
+    } else {
+      fail(`${field}.${key} must be a string, finite number or boolean`);
+    }
+  }
+  return result;
+};
+
 const validateAsset = (value: unknown, index: number): ProjectAsset => {
   const asset = record(value, `assets[${index}]`);
   const id = text(asset.id, `assets[${index}].id`);
@@ -159,12 +191,18 @@ const validateShot = (
       fail(`${field}.params.assetId references asset ${params.assetId} with approval ${asset.approval}`);
     }
   }
+  const renderer = text(shot.renderer, `${field}.renderer`);
+  const moduleParams = validateModuleParams(shot.moduleParams, `${field}.moduleParams`);
+  if (moduleParams !== undefined && !renderer.startsWith(PROJECT_SCENE_RENDERER_PREFIX)) {
+    fail(`${field}.moduleParams is only valid for a declared project scene module renderer`);
+  }
   return {
     id: text(shot.id, `${field}.id`),
     startFrame,
     endFrame,
-    renderer: text(shot.renderer, `${field}.renderer`),
+    renderer,
     params,
+    moduleParams,
   };
 };
 
@@ -256,6 +294,20 @@ export const validateProjectConfig = (
     }
   }
 
+  const sceneModules = parseSceneModules(config.sceneModules);
+  const moduleRendererKinds = new Set(
+    sceneModules.map((module) => `${PROJECT_SCENE_RENDERER_PREFIX}${module.id}`),
+  );
+  const protectedRendererKinds = options.rendererKinds;
+  if (protectedRendererKinds) {
+    for (const module of sceneModules) {
+      const kind = `${PROJECT_SCENE_RENDERER_PREFIX}${module.id}`;
+      if (protectedRendererKinds.has(kind)) {
+        fail(`sceneModules[${module.id}] renderer kind collides with a protected engine renderer`);
+      }
+    }
+  }
+
   const rawAssets = config.assets === undefined ? [] : array(config.assets, 'assets');
   const assets = rawAssets.map(validateAsset);
   uniqueIds(assets, 'assets');
@@ -287,23 +339,40 @@ export const validateProjectConfig = (
     if (cues[index].frame < cues[index - 1].frame) fail('cues must be sorted by frame');
   }
 
-  const rendererKinds = options.rendererKinds;
+  const rendererKinds = protectedRendererKinds;
+  const isAllowedRenderer = (kind: string): boolean =>
+    moduleRendererKinds.has(kind) || (rendererKinds !== undefined && rendererKinds.has(kind));
   const defaultRenderer = text(visualRaw.defaultRenderer, 'visual.defaultRenderer');
-  if (rendererKinds && !rendererKinds.has(defaultRenderer)) {
-    fail(`visual.defaultRenderer is not registered: ${defaultRenderer}`);
-  }
-  for (const [index, shot] of allShots.entries()) {
-    if (rendererKinds && !rendererKinds.has(shot.renderer)) {
-      fail(`shots[${index}].renderer is not registered: ${shot.renderer}`);
-    }
-  }
-
   const visual: VisualConfig = {
     styleProfile: text(visualRaw.styleProfile, 'visual.styleProfile'),
     defaultRenderer,
   };
+  if (
+    defaultRenderer.startsWith(PROJECT_SCENE_RENDERER_PREFIX) &&
+    !moduleRendererKinds.has(defaultRenderer)
+  ) {
+    fail(`visual.defaultRenderer references an undeclared scene module: ${defaultRenderer}`);
+  }
+  if (!isAllowedRenderer(defaultRenderer) && rendererKinds !== undefined) {
+    fail(`visual.defaultRenderer is not registered: ${defaultRenderer}`);
+  }
+  for (const [index, shot] of allShots.entries()) {
+    if (
+      shot.renderer.startsWith(PROJECT_SCENE_RENDERER_PREFIX) &&
+      !moduleRendererKinds.has(shot.renderer)
+    ) {
+      fail(`shots[${index}].renderer references an undeclared scene module: ${shot.renderer}`);
+    }
+    if (!isAllowedRenderer(shot.renderer) && rendererKinds !== undefined) {
+      fail(`shots[${index}].renderer is not registered: ${shot.renderer}`);
+    }
+  }
   const needsPixel =
-    defaultRenderer === 'pixel-canvas' || allShots.some((shot) => shot.renderer === 'pixel-canvas');
+    defaultRenderer === 'pixel-canvas' ||
+    allShots.some((shot) => shot.renderer === 'pixel-canvas') ||
+    sceneModules.some(
+      (module) => module.canvas.mode === 'project-pixel' || module.samplingFps === 'project-pixel',
+    );
   if (needsPixel) {
     const pixel = record(visualRaw.pixel, 'visual.pixel');
     const internalWidth = integer(pixel.internalWidth, 'visual.pixel.internalWidth', 1);
@@ -367,6 +436,7 @@ export const validateProjectConfig = (
     },
     cues,
     chapters,
+    sceneModules,
     assets,
     permissions: permissionsConfig,
     render: renderConfig,

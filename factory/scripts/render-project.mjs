@@ -42,6 +42,8 @@ if (!['video', 'still'].includes(mode)) {
 
 const {loadProject} = require('../dist/src/project/loadProject.js');
 const {stageProjectMedia} = require('../dist/src/media/stagePublic.js');
+// Bundling runs locally through @remotion/bundler inside bundleProject; no remote service is used.
+const {bundleProject} = require('../dist/src/remotion/bundleProject.js');
 const {
   assertSafePath,
   createProjectWriteBoundary,
@@ -82,7 +84,13 @@ const renderProject = {
   audioPublicPath: staged.audioPublicPath,
 };
 
-const {bundle} = await import('@remotion/bundler');
+const prepared = await bundleProject(project, {
+  engineRoot: repoRoot,
+  boundary,
+  stagedMedia: staged,
+  onProgress: () => undefined,
+});
+
 const {getCompositions, openBrowser, renderFrames, renderStill} = await import(
   '@remotion/renderer'
 );
@@ -92,12 +100,7 @@ const {getCompositions, openBrowser, renderFrames, renderStill} = await import(
 const browserExecutable =
   process.env.REMOTION_BROWSER_EXECUTABLE ?? process.env.CHROME_PATH ?? null;
 
-const serveUrl = await bundle({
-  entryPoint: path.join(repoRoot, 'factory', 'src', 'entry.tsx'),
-  publicDir: staged.publicDir,
-  onProgress: () => undefined,
-  enableCaching: false,
-});
+const serveUrl = prepared.serveUrl;
 
 const browser = await openBrowser('chrome', {browserExecutable, logLevel: 'warn'});
 let reportFrames = null;
@@ -232,6 +235,17 @@ try {
     publicDir: staged.publicDir,
     publicAssets: staged.publicAssets,
     audioPublicPath: staged.audioPublicPath,
+    bundle: {
+      entryPoint: path.relative(project.projectDir, prepared.entryPoint).split(path.sep).join('/'),
+      bundleDir: path.relative(project.projectDir, prepared.bundleDir).split(path.sep).join('/'),
+      moduleCount: prepared.modules.length,
+      modules: prepared.modules.map((module) => ({
+        id: module.id,
+        sourcePath: module.sourcePath,
+        stagedFile: `cache/engine-bundle/modules/${module.stagedFileName}`,
+        sha256: module.sha256,
+      })),
+    },
     composition: {
       id: composition.id,
       width: composition.width,

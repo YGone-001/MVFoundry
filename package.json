@@ -14,6 +14,7 @@
     "compositions": "remotion compositions factory/src/entry.tsx",
     "seed:examples": "npm run build && npm run fixtures && node factory/scripts/seed-workspace.mjs",
     "render:project": "npm run build && node factory/scripts/render-project.mjs",
+    "verify:modules": "npm run build && node factory/scripts/verify-module-render.mjs",
     "audit:git": "npm run build && node factory/scripts/audit-git.mjs",
     "audit:publication": "node security/audit-publication.mjs"
   },

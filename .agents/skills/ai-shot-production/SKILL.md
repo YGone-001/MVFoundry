@@ -18,6 +18,7 @@ Defines how generated media may enter a local project. P0 authorizes no provider
 - An approved frame-domain shot brief from `music-video-director`.
 - A visual identity contract from `visual-identity-continuity`.
 - Project config, asset manifest and local workspace path.
+- For project-local code, an explicitly declared Canvas 2D module with a `scenes/` path, contract version, SHA256, `user-authored-approved` trust, parameter schema and declared asset dependencies. Project scene modules are executable code, not generated media.
 - Explicit written authorization: provider, model scope, budget cap, data policy and rights.
 - Approved local references with SHA256.
 - Target output profile: dimensions, fps, duration and codec.
@@ -32,7 +33,8 @@ Defines how generated media may enter a local project. P0 authorizes no provider
 6. Run generation outside the engine repository. Keep raw output in the project workspace quarantine, never in the engine.
 7. Hash and inspect every revision; record source, model, prompt, seed, rights and approval in the asset manifest.
 8. Integrate only approved assets through the project's renderer adapter; keep a fail-closed path when missing.
-9. Hand evidence to `music-video-quality-gate`.
+9. If a shot uses a project-local scene module, confirm the module is user-authored/approved, hash-verified before bundling, confined to the project `scenes/` directory and free of remote imports or network references. Do not confuse hash identity with code safety.
+10. Hand evidence to `music-video-quality-gate`.
 
 ## Output contract
 
@@ -46,6 +48,8 @@ Defines how generated media may enter a local project. P0 authorizes no provider
 
 - Paid API calls in P0.
 - Uploading local audio, references, lyrics or private project media.
+- Loading project scene modules from a remote URL, npm, GitHub or another project.
+- Treating a matching module hash as proof that executable code is safe.
 - Sending unapproved references or performer likeness.
 - Embedding API keys, tokens or private paths in the repository.
 - Silently substituting generated footage for existing art.
@@ -57,6 +61,7 @@ Defines how generated media may enter a local project. P0 authorizes no provider
 - Written authorization exists and matches the provider, scope and budget.
 - No secrets or song-specific media entered the engine repository.
 - Every used asset is local, hashed, rights-recorded and approved.
+- Every used scene module is explicitly declared, hash-verified, trust-approved and integrated only through the bundle-local renderer contract.
 - The shot specification is complete and reproducible.
 - Unimplemented AI/video modes fail closed rather than rendering a placeholder as final.
 - The quality gate has reviewed the integration.

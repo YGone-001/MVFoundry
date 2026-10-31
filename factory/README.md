@@ -28,14 +28,22 @@ npm run compositions
 npx remotion studio factory/src/entry.tsx
 
 npm run render:project -- --project synthetic-pixel-demo --mode video --frames 0-23
-npm run render:project -- --project synthetic-layered-demo --mode still --frame 10
+npm run render:project -- --project synthetic-module-pixel-demo --mode video --frames 0-47
+npm run render:project -- --project synthetic-module-layered-demo --mode still --frame 20
 ```
 
 Set `REMOTION_BROWSER_EXECUTABLE` or `CHROME_PATH` when Remotion cannot locate a browser. Video encoding requires system FFmpeg on `PATH`.
 
+## Project scene modules
+
+A project may declare trusted Canvas 2D modules under its own `scenes/` directory. The loader checks the manifest path, SHA256 and source policy; the renderer stages verified copies and a generated entry under `<project>/cache/engine-bundle/`, bundles locally and binds `project:<id>` renderers. Project code is never copied into this repository and module functions are never sent through Remotion input props.
+
+`npm run verify:modules` expects a seeded `MV_WORKSPACE_ROOT` and a usable browser. It bundles both module examples, renders boundary/hold stills and writes `<project>/reports/module-render-evidence.json`. See `docs/project-config.md` §4.1 and `docs/workspace-safety.md`.
+
 ## Safety
 
 - `MV_WORKSPACE_ROOT` must be outside this repository and must not contain it.
-- Never place production audio, images or renders in this repository.
-- The renderer stages only approved, hash-verified assets into the external project cache.
+- Never place production audio, images, scene modules or renders in this repository.
+- The renderer stages only approved, hash-verified assets and declared, hash-verified modules into the external project cache.
+- Hash verification proves byte identity, not that module code is benign. Only run trusted local modules.
 - Do not commit or push without explicit authorization.

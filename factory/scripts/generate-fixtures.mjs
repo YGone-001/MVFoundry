@@ -157,10 +157,34 @@ const writePng = (file, width, height) => {
 const pixelWav = path.join(examples, 'synthetic-pixel-demo', 'source', 'audio', 'tone-2s.wav');
 const layeredWav = path.join(examples, 'synthetic-layered-demo', 'source', 'audio', 'tone-1.5s.wav');
 const layeredImage = path.join(examples, 'synthetic-layered-demo', 'assets', 'images', 'bg.png');
+const modulePixelWav = path.join(
+  examples,
+  'synthetic-module-pixel-demo',
+  'source',
+  'audio',
+  'tone-2s.wav',
+);
+const moduleLayeredWav = path.join(
+  examples,
+  'synthetic-module-layered-demo',
+  'source',
+  'audio',
+  'tone-1.5s.wav',
+);
+const moduleLayeredImage = path.join(
+  examples,
+  'synthetic-module-layered-demo',
+  'assets',
+  'images',
+  'bg.png',
+);
 
 writeWav(pixelWav, 2, 440);
 writeWav(layeredWav, 1.5, 330);
 writePng(layeredImage, 1080, 1350);
+writeWav(modulePixelWav, 2, 440);
+writeWav(moduleLayeredWav, 1.5, 330);
+writePng(moduleLayeredImage, 900, 1600);
 
 console.log(JSON.stringify({
   'synthetic-pixel-demo': {
@@ -169,5 +193,12 @@ console.log(JSON.stringify({
   'synthetic-layered-demo': {
     audio: {path: 'source/audio/tone-1.5s.wav', sha256: sha256(layeredWav)},
     image: {path: 'assets/images/bg.png', sha256: sha256(layeredImage)},
+  },
+  'synthetic-module-pixel-demo': {
+    audio: {path: 'source/audio/tone-2s.wav', sha256: sha256(modulePixelWav)},
+  },
+  'synthetic-module-layered-demo': {
+    audio: {path: 'source/audio/tone-1.5s.wav', sha256: sha256(moduleLayeredWav)},
+    image: {path: 'assets/images/bg.png', sha256: sha256(moduleLayeredImage)},
   },
 }, null, 2));

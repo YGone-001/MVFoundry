@@ -17,6 +17,10 @@ test('G12: workflow runs the required engine and security commands', () => {
     'npm ci',
     'npm run typecheck',
     'npm test',
+    'npm run seed:examples',
+    'npx remotion browser ensure',
+    'npm run verify:modules',
+    'npm run render:project',
     'npm run audit:publication',
     'npm run audit:git',
   ]) {
@@ -24,6 +28,10 @@ test('G12: workflow runs the required engine and security commands', () => {
   }
   assert.match(workflow, /windows-latest/);
   assert.match(workflow, /node-version: 20/);
+  assert.match(workflow, /MV_WORKSPACE_ROOT/);
+  assert.match(workflow, /MV_WORKSPACE_ROOT:\s*\$\{\{\s*runner\.temp\s*\}\}/);
+  assert.match(workflow, /steps\.ffmpeg\.outputs\.available/);
+  assert.match(workflow, /NOT RUN: system FFmpeg is unavailable/);
   assert.doesNotMatch(workflow, /ubuntu-latest|node: \[/);
-  assert.doesNotMatch(workflow, /upload-artifact|git push|secrets\./);
+  assert.doesNotMatch(workflow, /MV-Workspaces|Desktop\\program|upload-artifact|git push|secrets\./);
 });

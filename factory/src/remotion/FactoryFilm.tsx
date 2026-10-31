@@ -1,21 +1,30 @@
 import {AbsoluteFill, Audio, Img, staticFile, useCurrentFrame, useVideoConfig} from 'remotion';
 import {useLayoutEffect, useMemo, useRef} from 'react';
 import type {RenderProjectSnapshot, RenderProjectShot} from '../config/types';
-import {DEFAULT_SCENE_REGISTRY} from '../scenes/registry';
+import {createDefaultSceneRegistry, DEFAULT_SCENE_REGISTRY} from '../scenes/registry';
+import type {SceneRenderer} from '../scenes/types';
 import {buildSceneFrameInfo} from '../timeline/frameClock';
 import {resolveShotAtFrame, resolveShots} from '../timeline/resolver';
 
 export type FactoryFilmProps = {
   project: RenderProjectSnapshot;
+  extraRenderers?: SceneRenderer[];
 };
 
 const flattenShots = (project: RenderProjectSnapshot): RenderProjectShot[] =>
   project.chapters.flatMap((chapter) => chapter.shots);
 
-export const FactoryFilm: React.FC<FactoryFilmProps> = ({project}) => {
+export const FactoryFilm: React.FC<FactoryFilmProps> = ({project, extraRenderers}) => {
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
   const ref = useRef<HTMLCanvasElement>(null);
+
+  const registry = useMemo(() => {
+    if (!extraRenderers || extraRenderers.length === 0) return DEFAULT_SCENE_REGISTRY;
+    const created = createDefaultSceneRegistry();
+    for (const renderer of extraRenderers) created.register(renderer);
+    return created;
+  }, [extraRenderers]);
 
   const resolvedShots = useMemo(
     () =>
@@ -31,10 +40,10 @@ export const FactoryFilm: React.FC<FactoryFilmProps> = ({project}) => {
     [project],
   );
   const shot = resolveShotAtFrame(resolvedShots, frame, project.output.durationInFrames);
-  const renderer = DEFAULT_SCENE_REGISTRY.get(shot.shot.renderer);
+  const renderer = registry.get(shot.shot.renderer);
   const size = renderer.canvasSize(project, shot.shot as RenderProjectShot);
   const samplingFps = renderer.samplingFps(project, shot.shot as RenderProjectShot);
-  const isPixel = renderer.kind === 'pixel-canvas';
+  const isPixel = renderer.pixelated ?? renderer.kind === 'pixel-canvas';
   const backgroundPublicPath = shot.shot.params.assetId
     ? project.publicAssets[shot.shot.params.assetId]
     : undefined;

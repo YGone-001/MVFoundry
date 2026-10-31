@@ -28,18 +28,21 @@ It does not include any song, recording, lyrics, reference image, production sce
   - `pixel-canvas` — configurable internal resolution, nearest-neighbour display, hold-based sampling.
   - `layered-canvas` — full-resolution Canvas 2D with an optional approved image background.
   - `video` and `hybrid` — typed fail-closed placeholders.
+  - `project:<id>` — trusted, hash-verified Canvas 2D scene modules declared by the external project.
 - Approved-asset staging into the external project cache and Remotion `publicDir`.
+- Per-project staged Remotion entries and local bundles that never copy project scene source into this repository.
 - Local rendering with Remotion `renderFrames` plus system FFmpeg.
-- Two synthetic example projects, engine tests and publication audits.
+- Four synthetic example projects, engine tests and publication audits.
 
 ## 3. Architecture overview
 
 ```
-external workspace/project.json
-  -> workspace guard -> config validator -> loader (hashes, duration)
+external workspace/project.json + scenes/
+  -> workspace guard -> config and scene-module validator -> loader (hashes, duration)
   -> RenderProjectSnapshot
-  -> Remotion MV-Factory -> frame-domain resolver -> scene registry
-  -> pixel/layered renderer -> renderFrames -> system FFmpeg
+  -> hash-verified module copies -> staged project entry under <project>/cache
+  -> local Remotion bundle -> MV-Factory -> frame-domain resolver -> scene registry
+  -> pixel/layered/project renderer -> renderFrames -> system FFmpeg
   -> external project renders/
 ```
 
@@ -78,11 +81,11 @@ npm test
 
 `npm test` regenerates synthetic fixtures, compiles the engine and runs the test suite. Tests never require a private song or production asset, and they do not require FFmpeg.
 
-CI runs the same checks on Windows with Node 20, including junction behavior, then runs the publication and Git media audits. See `.github/workflows/engine-ci.yml`. The dependency advisory review is in [docs/dependency-security.md](docs/dependency-security.md).
+`npm run verify:modules` additionally requires a seeded external workspace and a usable browser; it bundles both module projects and renders real still evidence. CI runs the same checks on Windows with Node 20, including junction behavior, then runs the module bundle/still evidence, publication and Git media audits. See `.github/workflows/engine-ci.yml`. The dependency advisory review is in [docs/dependency-security.md](docs/dependency-security.md).
 
 ## 7. Creating a synthetic local project
 
-The engine ships two synthetic profiles: a pixel-art 16:9/24fps project and a nonpixel 4:5/30fps layered project.
+The engine ships four synthetic profiles: two declarative projects and two project-local scene-module projects. They cover a pixel-art 16:9/24fps profile, a nonpixel 4:5/30fps layered profile, a low-resolution module project and a full-resolution TSX module project.
 
 ```bash
 export MV_WORKSPACE_ROOT=/absolute/path/outside/this/repository
@@ -91,7 +94,7 @@ npm run seed:examples
 
 On PowerShell: `$env:MV_WORKSPACE_ROOT = 'C:\absolute\path\outside\this\repository'`.
 
-The seed command builds the engine, generates synthetic audio/image fixtures, validates the workspace boundary and creates the project folder skeleton.
+The seed command builds the engine, generates synthetic audio/image fixtures, validates the workspace boundary and creates the project folders, including `scenes/`.
 
 ## 8. Configuring MV_WORKSPACE_ROOT
 
@@ -113,7 +116,9 @@ Render from an external project:
 
 ```bash
 npm run render:project -- --project synthetic-pixel-demo --mode video --frames 0-23
-npm run render:project -- --project synthetic-layered-demo --mode still --frame 10
+npm run render:project -- --project synthetic-module-pixel-demo --mode video --frames 0-47
+npm run render:project -- --project synthetic-module-layered-demo --mode still --frame 20
+npm run verify:modules
 ```
 
 Set `REMOTION_BROWSER_EXECUTABLE` or `CHROME_PATH` if Remotion cannot locate a browser. The render script writes frames, caches, reports and outputs only inside the external project's `cache/` and `renders/` directories.
@@ -125,8 +130,9 @@ Set `REMOTION_BROWSER_EXECUTABLE` or `CHROME_PATH` if Remotion cannot locate a b
 - Song-specific data never belongs in this repository.
 - Workspace roots inside the repository are rejected.
 - Manifest paths are relative and canonicalized; traversal and links that escape the project are rejected.
-- Only approved, hash-verified assets are staged.
-- All render/staging/cache writes go through a central write boundary tied to the canonical project root.
+- Declared scene modules must stay under `scenes/`, be link-free and hash-verified before staging; unapproved, duplicate or cross-project modules fail closed.
+- Only approved, hash-verified assets and trusted modules are staged.
+- All engine-authored render, staging, cache and module-bundle writes go through a central write boundary tied to the canonical project root. The trusted Remotion/Webpack bundler writes its generated tree into a pre-validated empty cache directory.
 - Explicit output overrides are limited to direct children of the project `renders/` directory.
 - Cache cleanup is limited to strict descendants of `<project>/cache`; linked entries and protected sources are never deleted.
 - No public HTTP service is created for media.
@@ -138,12 +144,65 @@ Set `REMOTION_BROWSER_EXECUTABLE` or `CHROME_PATH` if Remotion cannot locate a b
 |---|---|
 | `pixel-canvas` | implemented |
 | `layered-canvas` | implemented foundation |
+| `project:<id>` | implemented for trusted Canvas 2D scene modules |
 | `video` | typed placeholder; fails closed |
 | `hybrid` | typed placeholder; fails closed |
 
-External project-local TypeScript scene loading is **not implemented**. P0 projects use declarative renderer parameters. A staged external-module loader is planned for a later phase and is not claimed here.
+Project-local TypeScript/TSX modules are supported through an explicit manifest and a per-project staged Remotion entry. Modules are executable local code and are trusted only after explicit user approval and hash verification. See §12.
 
-## 12. Third-party acknowledgments
+## 12. Project-local scene modules
+
+A project can declare self-contained Canvas 2D modules under its own `scenes/` directory:
+
+```json
+"sceneModules": [
+  {
+    "id": "runner",
+    "path": "scenes/runner.ts",
+    "moduleType": "canvas2d",
+    "contractVersion": 1,
+    "sha256": "<64 lowercase hex characters>",
+    "trust": "user-authored-approved",
+    "canvas": {"mode": "project-pixel"},
+    "samplingFps": "project-pixel",
+    "pixelated": true
+  }
+]
+```
+
+A shot references the module as `"renderer": "project:runner"`. Optional `moduleParams` are JSON-safe primitives validated at runtime against the module's declared schema. The module exports:
+
+```ts
+const sceneModule = {
+  id: 'runner',
+  contractVersion: 1,
+  moduleType: 'canvas2d',
+  params: [{key: 'speed', type: 'number', required: true}],
+  assetDependencies: [],
+  render(ctx, context) {
+    const tick = context.frame.animationTick; // frame-derived, deterministic
+    // draw with ctx; read context.canvas, context.output, params, moduleParams and assets
+  },
+};
+export default sceneModule;
+```
+
+The runtime context supplies the output frame, shot-local frame and time, output fps, renderer animation tick, the actual canvas size, project output metadata, shot identity, approved scene parameters, validated module parameters and approved asset references. Modules never receive a wall clock, timers or a mutable project object. A named `sceneModule` export is also accepted.
+
+Approval and validation:
+
+1. The path must be project-relative, reside under `scenes/`, end in `.ts` or `.tsx`, and contain no links or junctions.
+2. The declared SHA256 is checked before staging. The verified bytes are copied into `<project>/cache/engine-bundle/modules/`; the original file is never modified.
+3. `trust` must be exactly `user-authored-approved`. Missing, unapproved, duplicate or unknown-type modules fail closed.
+4. A source policy rejects imports, re-exports, dynamic code, network APIs or URLs, DOM access, timers, clock reads, randomness and environment access. This is a rejection policy, not a sandbox.
+5. A generated entry under `<project>/cache/engine-bundle/` imports only the staged copies and the engine through a controlled alias. It is bundled locally and never committed.
+6. At bundle load, module identity, contract version, module type, parameter schema and asset dependencies are validated. Unknown parameters, missing assets or undeclared modules stop rendering.
+
+A matching hash proves byte identity, not benign behavior. Only run user-authored or explicitly approved local scene code; there is no operating-system isolation, and the static policy cannot prove arbitrary TypeScript is safe. Importing the verified module executes its top-level code in the browser when the bundle loads, so approval must cover the whole module, not only its `render` function. Do not load scene code from the network, npm, GitHub or another project.
+
+See `docs/project-config.md`, `docs/rendering.md` and `docs/workspace-safety.md` for the full contract, negative tests and remaining trust boundary.
+
+## 13. Third-party acknowledgments
 
 - [Remotion](https://www.remotion.dev/) — video framework. Remotion has its own license terms; review https://remotion.pro/license before commercial use.
 - [React](https://react.dev/) — MIT.

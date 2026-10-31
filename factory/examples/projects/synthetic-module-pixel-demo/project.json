@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "projectId": "synthetic-module-pixel-demo",
+  "song": {
+    "title": "Synthetic Module Pixel Demo",
+    "artist": "Factory Fixtures"
+  },
+  "audio": {
+    "path": "source/audio/tone-2s.wav",
+    "sha256": "f6adfd0f098f1022c68d45ae9cfc5f3d88c1e24fdf07c109cd0abb8a5a773fa2",
+    "durationSeconds": 2,
+    "durationPolicy": "round",
+    "format": "wav-pcm"
+  },
+  "lyrics": {
+    "language": "none",
+    "path": null
+  },
+  "narrative": {
+    "mode": "abstract"
+  },
+  "visual": {
+    "styleProfile": "pixel-art-module",
+    "defaultRenderer": "project:runner",
+    "pixel": {
+      "internalWidth": 480,
+      "internalHeight": 270,
+      "samplingFps": 12
+    }
+  },
+  "output": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24
+  },
+  "cues": [
+    {
+      "id": "CUE-01",
+      "frame": 0,
+      "timeSeconds": 0,
+      "source": "synthetic",
+      "label": "start"
+    },
+    {
+      "id": "CUE-02",
+      "frame": 24,
+      "timeSeconds": 1,
+      "source": "synthetic",
+      "label": "mid"
+    },
+    {
+      "id": "CUE-03",
+      "frame": 48,
+      "timeSeconds": 2,
+      "source": "synthetic",
+      "label": "end"
+    }
+  ],
+  "chapters": [
+    {
+      "id": "CH-01",
+      "title": "Runner",
+      "startFrame": 0,
+      "endFrame": 24,
+      "shots": [
+        {
+          "id": "SHOT-01",
+          "startFrame": 0,
+          "endFrame": 24,
+          "renderer": "project:runner",
+          "params": {
+            "background": "#0B1B2B",
+            "accent": "#2EC4B6",
+            "secondary": "#FF9F1C"
+          },
+          "moduleParams": {
+            "speed": 2.4,
+            "glow": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "CH-02",
+      "title": "Signal",
+      "startFrame": 24,
+      "endFrame": 48,
+      "shots": [
+        {
+          "id": "SHOT-02",
+          "startFrame": 24,
+          "endFrame": 48,
+          "renderer": "project:signal",
+          "params": {
+            "background": "#101726",
+            "accent": "#FF9F1C",
+            "secondary": "#2EC4B6"
+          },
+          "moduleParams": {
+            "bands": 6,
+            "glow": false
+          }
+        }
+      ]
+    }
+  ],
+  "sceneModules": [
+    {
+      "id": "runner",
+      "path": "scenes/runner.ts",
+      "moduleType": "canvas2d",
+      "contractVersion": 1,
+      "sha256": "cc61fd4253e5e4ae3e32cbbe4eab9dfb6ed1b34f42f4dd745ecb6ba6e7ff4930",
+      "trust": "user-authored-approved",
+      "canvas": {
+        "mode": "project-pixel"
+      },
+      "samplingFps": "project-pixel",
+      "pixelated": true,
+      "label": "Pixel road runner",
+      "description": "Deterministic low-resolution runner driven by the animation tick."
+    },
+    {
+      "id": "signal",
+      "path": "scenes/signal.ts",
+      "moduleType": "canvas2d",
+      "contractVersion": 1,
+      "sha256": "56afa88b424826a5854053da4048e9884fcc61e7b5b9723e7ebb25cfa4860a7f",
+      "trust": "user-authored-approved",
+      "canvas": {
+        "mode": "project-pixel"
+      },
+      "samplingFps": "project-pixel",
+      "pixelated": true,
+      "label": "Pixel signal tower",
+      "description": "Deterministic tower pulses and scrolling city lights."
+    }
+  ],
+  "assets": [],
+  "permissions": {
+    "externalGeneration": false,
+    "localOnly": true,
+    "allowNetwork": false
+  },
+  "render": {
+    "codec": "h264",
+    "pixelFormat": "yuv420p",
+    "colorSpace": "bt709",
+    "imageFormat": "png"
+  }
+}

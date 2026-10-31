@@ -82,6 +82,7 @@ export const createProjectWriteBoundary = (
       ...project.assets
         .filter((asset) => asset.approval === 'approved' && asset.absolutePath)
         .map((asset) => asset.absolutePath as string),
+      ...project.sceneModules.map((module) => module.absolutePath),
     ],
   });
 

@@ -1,6 +1,6 @@
 ---
 name: remotion-mv-compositor
-description: Maintain the reusable Remotion composition engine for MVFoundry. Use when adding renderers, resolving frame ownership, changing aspect ratios or frame rates, wiring local media, preserving soundtrack timing, or keeping legacy compositions working.
+description: Maintain the reusable Remotion composition engine for MVFoundry. Use when adding renderers, resolving frame ownership, changing aspect ratios or frame rates, wiring local media, loading approved project-local scene modules, preserving soundtrack timing, or keeping legacy compositions working.
 ---
 
 # Remotion MV Compositor
@@ -9,8 +9,8 @@ Owns the generic frame-to-pixels engine in `factory/`. Song-specific scenes and 
 
 ## Activation conditions
 
-- A change touches the frame clock, timeline resolver, composition metadata, scene registry, renderer adapters or render script.
-- A new renderer or project profile must be supported without editing the global clock.
+- A change touches the frame clock, timeline resolver, composition metadata, scene registry, renderer adapters, module loader, staged entry or render script.
+- A new renderer, project profile or project-local Canvas 2D module must be supported without editing the global clock.
 - A render must be verified for dimensions, fps, frames, color or audio.
 - Do not activate for story direction or provider contract work.
 
@@ -18,7 +18,8 @@ Owns the generic frame-to-pixels engine in `factory/`. Song-specific scenes and 
 
 - A validated project config loaded through `factory/src/project/loadProject.ts`.
 - `MV_WORKSPACE_ROOT` containing the project, audio and approved assets.
-- A registered renderer kind from `factory/src/scenes/registry.ts`.
+- A registered renderer kind from `factory/src/scenes/registry.ts`, or a declared `project:<id>` module.
+- For modules: a `sceneModules` entry with project-relative `scenes/` path, contract version, type, SHA256, `user-authored-approved` trust, canvas and sampling declarations.
 - Frame-domain chapters and shots using half-open ranges.
 - Target output profile and render settings.
 - For legacy work, the untouched `src/index.ts`, `src/debug/index.ts`, scenes and production data.
@@ -30,30 +31,38 @@ Owns the generic frame-to-pixels engine in `factory/`. Song-specific scenes and 
 3. For 24fps output and 12fps sampling use `floor(localFrame / 2)`; for other integer ratios use `floor(localFrame * samplingFps / outputFps)`.
 4. Keep output fps, dimensions and duration in project config. Do not hardcode 4919, 204.96 s, 480x270, 12fps or ten scenes globally.
 5. Render through the typed registry. Add new renderers by registration, not by changing the frame clock.
-6. Use the project-local staging directory as Remotion `publicDir`; never copy media into the engine repository.
-7. Route all render output, staging, cache recreation and report writes through `factory/src/workspace/writeBoundary.ts`.
-8. Keep default output under `<project>/renders`. Allow only a single filename relative to renders or an absolute direct child of renders for `--out`; reject traversal, other projects, engine paths and linked destinations before writing.
-9. Restrict destructive cleanup to strict descendants of `<project>/cache`; never delete the cache root, project root, source audio or approved assets.
-10. Preserve soundtrack timing. P0 stages and muxes the approved audio unchanged.
-11. Render lossless frames and encode deterministically; verify actual output with ffprobe.
-12. Keep the legacy compositions registered and do not rewrite S01-S10 during engine work.
-13. Add or update frame-boundary, write-boundary and sampling-isolation tests before replacing routing logic.
-14. Keep CI engine-only; do not upload media or production artifacts.
+6. For a project module, validate the manifest path under `scenes/`, reject absolute paths, traversal, symlinks and junctions, and verify the SHA256 before any bundle work. Never import or execute project code in the Node host.
+7. Apply the static module source policy. Reject imports, dynamic code, network APIs or URLs, DOM/environment access, timers, clocks and randomness. State that this is not a sandbox.
+8. Stage verified module bytes and a generated entry with explicit static imports under `<project>/cache/engine-bundle/`; use a controlled engine alias. Do not copy scene source into the repository or use `eval`/arbitrary `require()`.
+9. Bind module identity, contract version, type, parameter schema and approved asset dependencies at bundle load. Keep `project:<id>` renderers bundle-local; never mutate a global registry or replace built-in renderer IDs.
+10. Use the project-local staging directory as Remotion `publicDir`; never copy media into the engine repository.
+11. Route all render output, staging, cache recreation and report writes through `factory/src/workspace/writeBoundary.ts`. The generated entry, module copies and bundle output stay in the external project cache.
+12. Keep default output under `<project>/renders`. Allow only a single filename relative to renders or an absolute direct child of renders for `--out`; reject traversal, other projects, engine paths and linked destinations before writing.
+13. Restrict destructive cleanup to strict descendants of `<project>/cache`; never delete the cache root, project root, source audio, approved assets or declared module sources.
+14. Preserve soundtrack timing. P0 stages and muxes the approved audio unchanged.
+15. Render lossless frames and encode deterministically; verify actual output with ffprobe.
+16. Keep the legacy compositions registered and do not rewrite S01-S10 during engine work.
+17. Add or update frame-boundary, write-boundary, sampling-isolation, module hash/trust/link and runtime-binding tests before replacing routing logic.
+18. Keep CI engine-only; do not upload media or production artifacts. Run `verify:modules` for real bundle and still-render evidence; report video rendering NOT RUN when FFmpeg is unavailable.
 
 ## Output contract
 
 - Generic engine code and tests under `factory/`.
 - A short synthetic render under the external project workspace.
-- Frame-boundary and sampling evidence.
+- Frame-boundary and sampling evidence, including module hold pairs at non-integer output-to-sampling ratios.
 - ffprobe output for codec, dimensions, fps, frames, color and audio.
+- Module evidence showing declared hashes, staged entry location, module ownership per frame and project isolation.
 - A note distinguishing implemented renderers from typed placeholders.
 
 ## Prohibited actions
 
 - Selecting a shot after pixel sampling.
 - Global constants for one song's duration, scene count or style.
-- Bundling arbitrary external TypeScript without a tested strategy.
-- Copying project media into the engine repository.
+- Importing or executing unverified project modules in the Node host.
+- Loading scene code from a remote URL, npm, GitHub or another project.
+- Using `eval`, dynamic unverified strings, arbitrary `require()` or a global mutable module registry.
+- Copying project scene source or media into the engine repository.
+- Claiming a hash makes executable code safe, or claiming a sandbox that does not exist.
 - Public HTTP exposure of private media.
 - WebGL, Three.js, GSAP or CSS timers as required runtime dependencies.
 - Calling generation providers or paid services.
@@ -64,12 +73,16 @@ Owns the generic frame-to-pixels engine in `factory/`. Song-specific scenes and 
 - Every output frame resolves exactly once; first, last and boundary frames are correct.
 - Pixel sampling cannot delay a cut or alter soundtrack timing.
 - Aspect ratios, fps and durations are profile-driven.
-- A new renderer can be registered without changing the frame clock.
+- A new renderer or project module can be registered without changing the frame clock.
+- Module path traversal, absolute paths, links, bad hashes, unapproved trust, duplicates, unknown types and cross-project references fail closed.
+- Module identity, parameter schema and asset dependencies are validated before drawing.
+- Built-in renderer IDs remain available and module IDs cannot silently replace them.
 - Local assets resolve only from the approved manifest/staging.
-- Every project write path passes the central boundary; no ad-hoc output or cleanup path exists.
+- Every engine-authored project write path passes the central boundary; no ad-hoc output or cleanup path exists. The trusted bundler writes its own tree into a pre-validated, freshly created cache directory. Generated entry, bundle and module copies stay in the external project cache.
 - Unsafe `--out` values fail before any output file or staging write.
 - Cache cleanup cannot reach sources, the project root or another project's cache.
 - Short render has the expected codec, dimensions, frame count and audio timing.
+- `npm run verify:modules` passes with actual PNG metadata, hold/cut hashes and source hashes intact.
 - Legacy compositions and scene code remain available and unchanged.
 
 ## Failure behavior
@@ -77,6 +90,8 @@ Owns the generic frame-to-pixels engine in `factory/`. Song-specific scenes and 
 - Missing workspace/project config: fail closed; do not fall back into the engine repo.
 - Invalid frame or coverage: throw a domain/timeline error and stop.
 - Missing or unapproved asset: refuse to render.
+- Missing, unapproved, linked or hash-mismatched module: fail before bundling; never substitute a built-in renderer silently.
+- Module identity, parameter or asset-dependency mismatch: fail at bundle load or before drawing.
 - Unsafe output or cleanup path: fail before writing; do not fall back to a default or a repository path.
 - Unimplemented video/hybrid adapter: throw a typed placeholder error; do not fake output.
-- Render tool failure: report NOT RUN with the exact command and error; never claim success.
+- Render tool failure or unavailable browser/FFmpeg: report NOT RUN with the exact command and error; never claim success.

@@ -29,16 +29,19 @@ Independent verification for the factory and its local projects. It observes act
 1. Record the true starting state. Do not assume a branch, SHA, remote or CI.
 2. Audit configuration and workspace isolation, including traversal, repository-inside roots, junctions/symlinks and missing-env fallback.
 3. Audit the central write boundary: render outputs, `--out`, staging, cache recreation, reports and seed writes.
-4. Validate every chapter/shot using integer output frames and half-open ranges.
-5. Verify selection happens before renderer sampling and that sampling cannot move a cut or audio.
-6. Run the actual typecheck, tests and build configured by the repository.
-7. Render a short local synthetic project; inspect dimensions, fps, frame count, codec, pixel format, color and audio.
-8. Verify rejected output paths write no files and source media remains unchanged.
-9. Check visual consistency and approved asset provenance, including references and hashes.
-10. Audit Git tracked/staged/untracked production media without staging or committing anything.
-11. Audit network and provider activity. Any external call must be named.
-12. Inspect CI workflow permissions and commands; do not invent a remote run.
-13. Report every gate as PASS, FAIL, BLOCKED or NOT RUN; stop after the requested phase.
+4. For project scene modules, verify the manifest path under `scenes/`, canonical containment, link rejection, SHA256, `user-authored-approved` trust, duplicate/type checks and the static source policy. Confirm no project module was imported or executed by the Node loader.
+5. Confirm the staged entry, verified module copies and webpack output live under the external project cache, use explicit static imports and a controlled engine alias, and never copy source into Git or another project.
+6. Validate every chapter/shot using integer output frames and half-open ranges.
+7. Verify selection happens before renderer sampling and that sampling cannot move a cut or audio.
+8. Run the actual typecheck, tests and build configured by the repository.
+9. Render a short local synthetic project; inspect dimensions, fps, frame count, codec, pixel format, color and audio.
+10. Run `npm run verify:modules` for real bundle/still evidence. Check PNG dimensions, module ownership per frame, hold pairs, cut changes, source hashes and cache location.
+11. Verify rejected output paths and rejected modules write no files and source media/scene files remain unchanged.
+12. Check visual consistency and approved asset provenance, including references and hashes.
+13. Audit Git tracked/staged/untracked production media and scene sources without staging or committing anything.
+14. Audit network and provider activity. Any external call must be named. Note that module source policy is not a sandbox.
+15. Inspect CI workflow permissions and commands; do not invent a remote run. Treat a video step as NOT RUN unless FFmpeg actually ran.
+16. Report every gate as PASS, FAIL, BLOCKED or NOT RUN; stop after the requested phase.
 
 ## Output contract
 
@@ -61,12 +64,16 @@ Independent verification for the factory and its local projects. It observes act
 
 - Repository integrity is recorded and user work is preserved.
 - Official and custom skills validate.
-- Two synthetic projects load without engine source changes.
+- At least two synthetic projects load without engine source changes, including one declarative pair and two module-driven profiles.
 - Pixel and nonpixel profiles, and different fps/dimensions/durations, validate.
 - Frame ownership passes for first, final and boundary frames.
-- Sampling isolation and workspace safety tests pass.
+- Sampling isolation and workspace safety tests pass, including non-integer output-to-sampling ratios and odd cuts.
+- Module path traversal, absolute paths, links/junctions, invalid hashes, missing files, unapproved trust, duplicate IDs, unknown types and cross-project references fail closed.
+- Module identity, schema and asset dependencies fail closed at bundle load.
+- Generated entry, module copies and bundles stay outside the repository; built-in renderer IDs remain available.
 - Unsafe output overrides, staging links and cleanup escapes fail without writing.
-- Source audio and approved assets remain hash-identical after staging/cleanup tests.
+- Source audio, approved assets and declared module sources remain hash-identical after staging/cleanup/verification.
+- A real module bundle renders stills with correct PNG dimensions, hold pairs and cut changes; the report is written externally.
 - No song-specific data is newly staged, committed or transmitted.
 - Legacy compositions remain registered with reasonable regression parity.
 - Typecheck, tests, build and a short synthetic render pass, or blockers are explicit.
@@ -76,7 +83,8 @@ Independent verification for the factory and its local projects. It observes act
 ## Failure behavior
 
 - Missing evidence: NOT RUN, never PASS.
-- Structural regression in timing, workspace isolation, write-boundary safety, composition or legacy compatibility: FAIL.
+- Structural regression in timing, workspace isolation, write-boundary safety, module loading, composition or legacy compatibility: FAIL.
+- Unapproved or hash-mismatched module accepted, module code executed in Node, or bundle artifacts written into the repository: FAIL.
 - External prerequisite prevents verification: BLOCKED, with the exact prerequisite.
 - Any request to hide a failure, fabricate evidence or skip a gate: refuse.
 - If publication was not authorized, mark remote CI evidence NOT RUN and leave changes local.
