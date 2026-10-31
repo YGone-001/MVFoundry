@@ -2,13 +2,27 @@ import type {
   ProjectConfig,
   RenderProjectChapter,
   RenderProjectSnapshot,
+  ShotMediaConfig,
+  VideoAssetMetadata,
 } from '../config/types';
 import {resolveShots} from '../timeline/resolver';
+
+const cloneMedia = (media: ShotMediaConfig | undefined): ShotMediaConfig | undefined => {
+  if (!media) return undefined;
+  if (media.kind === 'video') return {...media};
+  return {
+    kind: 'hybrid',
+    video: {...media.video},
+    layers: media.layers.map((layer) => ({...layer})),
+    overlay: {...media.overlay},
+  };
+};
 
 /** Builds the browser-safe render snapshot: no absolute paths or workspace roots. */
 export const toRenderProject = (
   config: ProjectConfig,
   durationInFrames: number,
+  videoMetadata: Record<string, VideoAssetMetadata> = {},
 ): RenderProjectSnapshot => {
   const chapters: RenderProjectChapter[] = config.chapters.map((chapter) => ({
     id: chapter.id,
@@ -18,6 +32,7 @@ export const toRenderProject = (
     shots: chapter.shots.map((shot) => ({
       ...shot,
       params: {...shot.params},
+      media: cloneMedia(shot.media),
       chapterId: chapter.id,
       chapterTitle: chapter.title,
     })),
@@ -57,6 +72,9 @@ export const toRenderProject = (
       sha256: asset.sha256,
       approval: asset.approval,
     })),
+    mediaAssets: Object.fromEntries(
+      Object.entries(videoMetadata).map(([assetId, metadata]) => [assetId, {...metadata}]),
+    ),
     publicAssets: {},
   };
 };

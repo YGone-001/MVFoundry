@@ -8,7 +8,7 @@ import type {
 } from '../../config/types';
 import {SceneModuleError} from '../../errors';
 import type {SceneFrameInfo} from '../../timeline/frameClock';
-import type {CanvasSize, SceneRenderer} from '../types';
+import type {CanvasSize, CanvasSceneRenderer} from '../types';
 import {
   PROJECT_SCENE_MODULE_CONTRACT_VERSION,
   PROJECT_SCENE_MODULE_TYPE,
@@ -317,7 +317,7 @@ const collectAssets = (
 export const createProjectSceneRenderer = (
   binding: ProjectSceneModuleBinding,
   definition: ProjectSceneModuleDefinition,
-): SceneRenderer => ({
+): CanvasSceneRenderer => ({
   kind: projectSceneRendererKind(binding.id),
   pixelated: binding.pixelated,
   canvasSize: (project) => resolveProjectSceneCanvas(binding, project),
@@ -362,7 +362,7 @@ export const bindProjectSceneModules = (
   bindings: readonly ProjectSceneModuleBinding[],
   importedModules: readonly unknown[],
   approvedAssetIds: readonly string[],
-): SceneRenderer[] => {
+): CanvasSceneRenderer[] => {
   if (!Array.isArray(bindings) || !Array.isArray(importedModules)) {
     fail('Scene module bindings and imports must be arrays');
   }
@@ -371,7 +371,7 @@ export const bindProjectSceneModules = (
   }
   const approved = new Set(approvedAssetIds);
   const seen = new Set<string>();
-  const renderers: SceneRenderer[] = [];
+  const renderers: CanvasSceneRenderer[] = [];
   for (const [index, binding] of bindings.entries()) {
     assertBinding(binding);
     const kind = projectSceneRendererKind(binding.id);
@@ -380,5 +380,5 @@ export const bindProjectSceneModules = (
     const definition = readProjectSceneModule(importedModules[index], binding, approved);
     renderers.push(createProjectSceneRenderer(binding, definition));
   }
-  return Object.freeze(renderers) as SceneRenderer[];
+  return Object.freeze(renderers) as CanvasSceneRenderer[];
 };

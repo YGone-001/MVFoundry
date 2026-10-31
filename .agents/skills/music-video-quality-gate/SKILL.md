@@ -10,7 +10,7 @@ Independent verification for the factory and its local projects. It observes act
 ## Activation conditions
 
 - Any P0/P1 acceptance, release, render or migration report is requested.
-- Timing, renderer, workspace isolation, asset provenance or skills changed.
+- Timing, renderer, workspace isolation, media provenance, Video/Hybrid composition or skills changed.
 - A project transitions from planning to render.
 - Do not use to implement fixes during a gate run; gate first, then repair.
 
@@ -20,7 +20,7 @@ Independent verification for the factory and its local projects. It observes act
 - `factory/` source, tests, build output and scripts.
 - `MV_WORKSPACE_ROOT` and the specific project config/assets.
 - Actual test, typecheck, build, composition and render outputs.
-- ffprobe output for delivered media.
+- ffprobe output for delivered media, including source and output video/audio streams.
 - Skill inventory and `AGENTS.md`.
 - Written authorization for any provider, paid call, publish or commit.
 
@@ -35,13 +35,15 @@ Independent verification for the factory and its local projects. It observes act
 7. Verify selection happens before renderer sampling and that sampling cannot move a cut or audio.
 8. Run the actual typecheck, tests and build configured by the repository.
 9. Render a short local synthetic project; inspect dimensions, fps, frame count, codec, pixel format, color and audio.
-10. Run `npm run verify:modules` for real bundle/still evidence. Check PNG dimensions, module ownership per frame, hold pairs, cut changes, source hashes and cache location.
-11. Verify rejected output paths and rejected modules write no files and source media/scene files remain unchanged.
-12. Check visual consistency and approved asset provenance, including references and hashes.
-13. Audit Git tracked/staged/untracked production media and scene sources without staging or committing anything.
-14. Audit network and provider activity. Any external call must be named. Note that module source policy is not a sandbox.
-15. Inspect CI workflow permissions and commands; do not invent a remote run. Treat a video step as NOT RUN unless FFmpeg actually ran.
-16. Report every gate as PASS, FAIL, BLOCKED or NOT RUN; stop after the requested phase.
+10. For Video/Hybrid, verify approved asset hashes, FFprobe metadata, output-frame-aligned source in-points, source duration under `reject`, fit/scale/layer/overlay rules and source-audio muting. Reject VFR/rotated/corrupt/unsupported sources and malformed layers.
+11. Run `npm run verify:modules` for real bundle/still evidence. Check PNG dimensions, module ownership per frame, hold pairs, cut changes, source hashes and cache location.
+12. Run `npm run media:seed` and `npm run media:verify` when FFmpeg/FFprobe are available. Check actual decoded source colors at in-points/cuts, complete video metadata, PNG alpha/compositing, overlay motion, one soundtrack stream, muted source audio and source hashes. Report skipped media/video checks as NOT RUN.
+13. Verify rejected output paths, rejected modules and rejected media write no files and source media/scene files remain unchanged.
+14. Check visual consistency and approved asset provenance, including references and hashes.
+15. Audit Git tracked/staged/untracked production media and scene sources without staging or committing anything.
+16. Audit network and provider activity. Any external call must be named. Note that module source policy is not a sandbox.
+17. Inspect CI workflow permissions and commands; do not invent a remote run. Treat a media/video step as NOT RUN unless FFmpeg actually ran.
+18. Report every gate as PASS, FAIL, BLOCKED or NOT RUN; stop after the requested phase.
 
 ## Output contract
 
@@ -79,12 +81,17 @@ Independent verification for the factory and its local projects. It observes act
 - Typecheck, tests, build and a short synthetic render pass, or blockers are explicit.
 - CI workflow has read-only permissions, engine-only jobs and no artifact upload.
 - No provider/paid/network project-data activity occurred.
+- Video/Hybrid shots use approved, hash-verified local sources with shot-local mapping; VFR/rotated/too-short sources and invalid layers fail closed.
+- Actual decoded Video/Hybrid output shows the intended source colors/cuts, transparent PNG layer and Canvas overlay in the same frames.
+- Exactly one soundtrack audio stream remains; embedded video audio is muted.
+- `media:seed`/`media:verify` evidence is external and source hashes are unchanged.
 
 ## Failure behavior
 
 - Missing evidence: NOT RUN, never PASS.
-- Structural regression in timing, workspace isolation, write-boundary safety, module loading, composition or legacy compatibility: FAIL.
+- Structural regression in timing, workspace isolation, write-boundary safety, module loading, media probing/timing/composition, composition or legacy compatibility: FAIL.
 - Unapproved or hash-mismatched module accepted, module code executed in Node, or bundle artifacts written into the repository: FAIL.
+- A Video/Hybrid claim without decoded output, or a source-audio policy violation, is FAIL/NOT RUN as appropriate; never PASS.
 - External prerequisite prevents verification: BLOCKED, with the exact prerequisite.
 - Any request to hide a failure, fabricate evidence or skip a gate: refuse.
 - If publication was not authorized, mark remote CI evidence NOT RUN and leave changes local.

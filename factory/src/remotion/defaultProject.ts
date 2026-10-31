@@ -73,5 +73,6 @@ export const DEFAULT_RENDER_PROJECT: RenderProjectSnapshot = {
   },
   audio: {durationSeconds: 2, sha256: '0'.repeat(64), durationPolicy: 'round'},
   assets: [],
+  mediaAssets: {},
   publicAssets: {},
 };

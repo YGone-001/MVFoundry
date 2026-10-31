@@ -18,6 +18,7 @@ Creates a per-project visual contract. It supports many styles and does not impo
 - Project config with narrative mode and `visual.styleProfile`.
 - Approved references or explicit PENDING status.
 - Asset manifest entries with hash, source, rights and approval.
+- Video/layer media contracts when Hybrid composition is used.
 - Existing shots or renders for comparison.
 - Style-pack references. A pixel style pack may define a fixed internal resolution, nearest-neighbour display and hold-based animation; those constraints apply only when the project profile explicitly selects pixel art.
 
@@ -31,7 +32,8 @@ Creates a per-project visual contract. It supports many styles and does not impo
 6. Translate the contract into scene parameters or generation prompts, not engine constants.
 7. Audit every new shot against the contract; flag unintended costume, layout, style or object changes.
 8. Enforce style-specific geometry only in that style: 480x270 with 12fps sampling for the pixel style pack; full-resolution layered composition for nonpixel styles.
-9. Write a continuity report and hand off to the quality gate.
+9. For Hybrid shots, verify the transparent PNG layer's identity anchors, alpha, scale/position and explicit order; confirm the Canvas overlay does not obscure or replace approved identity layers.
+10. Write a continuity report and hand off to the quality gate.
 
 ## Output contract
 
@@ -56,6 +58,7 @@ Creates a per-project visual contract. It supports many styles and does not impo
 - Every used asset is approved, hashed and rights-recorded.
 - Character and environment anchors are stable across audited shots.
 - Pixel-only constraints appear only in pixel projects.
+- Hybrid layer alpha/order and overlay placement preserve the approved visual identity.
 - Missing references are marked PENDING, not fabricated.
 - No engine source change is required for a new style profile.
 

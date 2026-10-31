@@ -12,9 +12,9 @@ factory/
     config/       types, validation, duration policy, scene-module manifest parsing
     workspace/    workspace root, path isolation, central write boundary
     timeline/     frame clock, shot resolver, sampling
-    scenes/       renderer contracts, registry, pixel/layered/placeholders
+    scenes/       renderer contracts, registry, pixel/layered/video/hybrid
       external/   project-local module contract, runtime binding and adapter
-    media/        hashing, PCM WAV metadata, approved-asset staging
+    media/        hashing, PCM WAV metadata, video/PNG probes, timeline checks, staging
     project/      loader, browser-safe snapshot, module loading and staged entry
     remotion/     MV-Factory composition, default demo and local project bundling
     audit/        read-only Git audit
@@ -30,17 +30,16 @@ security/         publication allowlist and audit
 ## 3. Data flow
 
 ```
-external project.json + scenes/
+external project.json + scenes/ + approved media
   -> workspace guard
-  -> config validator (including scene-module manifest)
-  -> loader (audio WAV metadata/hash, asset hashes, module paths/hashes/source policy, shot coverage)
+  -> config validator (sceneModules, moduleParams, typed media)
+  -> loader (audio WAV, asset hashes, FFprobe/PNG probes, module paths/hashes/source policy, media timelines, shot coverage)
   -> RenderProjectSnapshot (no absolute paths)
   -> staged verified module copies + generated entry under project cache
   -> local Remotion bundle with engine alias and project publicDir
   -> MV-Factory (dynamic dimensions/fps/duration)
   -> shot resolution on raw output frame
-  -> renderer sampling
-  -> SceneRegistry renderer (built-in or project:<id> adapter)
+  -> Canvas path or shot-local React media Sequence
   -> renderFrames to project cache
   -> system FFmpeg to project renders/
 ```
@@ -58,7 +57,7 @@ external project.json + scenes/
 
 ## 5. Project configuration
 
-`project.json` defines identity, song metadata, audio path/hash/duration policy, lyrics/language, narrative mode, style profile, optional pixel profile, output size/fps, cues, chapters/shots, optional `sceneModules` and shot `moduleParams`, asset approvals, local-only permissions and render settings. Full rules are in `docs/project-config.md`.
+`project.json` defines identity, song metadata, audio path/hash/duration policy, lyrics/language, narrative mode, style profile, optional pixel profile, output size/fps, cues, chapters/shots, optional `sceneModules`, shot `moduleParams`, optional typed `media` for video/hybrid shots, asset approvals, local-only permissions and render settings. Full rules are in `docs/project-config.md`.
 
 Duration is derived from audio metadata with a declared `round|floor|ceil` policy. There are no global duration or scene-count constants.
 
@@ -92,10 +91,14 @@ Race limitation: Node.js path-based filesystem APIs do not provide an atomic ope
 ## 8. Media and rendering
 
 - 16-bit PCM WAV metadata is read locally; SHA256 and duration are verified.
-- Approved images/layers are copied to `cache/render-public` and served to Remotion as `publicDir`.
+- Approved assets are hash-verified and staged into `cache/render-public`.
+- Video assets are probed with FFprobe: MP4/H.264, dimensions, constant frame rate, duration, audio presence and zero rotation. VFR, rotated, corrupt, unsupported or too-short sources fail closed.
+- Layer assets are validated as 8-bit alpha PNGs via their IHDR before staging.
+- Video sources are mapped to shot-local time with Remotion `Sequence` and `OffthreadVideo`'s composition-frame `trimBefore`; embedded audio is muted.
+- Hybrid shots compose fallback background, video, ordered transparent PNG layers and a deterministic Canvas overlay.
 - Video is produced by `renderFrames` (lossless PNG) plus system FFmpeg, because Remotion's bundled FFmpeg may not be able to write outside the repository in restricted environments.
-- Outputs: H.264, yuv420p, BT.709 tags, optional AAC audio.
-- Renders, frames, caches and reports never enter Git.
+- Outputs: H.264, yuv420p, BT.709 tags, optional AAC soundtrack.
+- Renders, frames, caches, generated media fixtures and reports never enter Git.
 
 ## 9. Renderers and project scene modules
 
@@ -104,10 +107,12 @@ Race limitation: Node.js path-based filesystem APIs do not provide an atomic ope
 | `pixel-canvas` | implemented | configurable internal resolution; hold-based sampling |
 | `layered-canvas` | implemented foundation | full-resolution Canvas 2D; approved image background |
 | `project:<id>` | implemented | trusted project-local Canvas 2D module bound per bundle |
-| `video` | placeholder | typed; fails closed |
-| `hybrid` | placeholder | typed; fails closed |
+| `video` | implemented | approved local H.264 MP4; shot-local source in-point; muted source audio |
+| `hybrid` | implemented | video + ordered transparent PNG layers + deterministic Canvas overlay |
 
-Renderers are registered in a typed registry. Adding a renderer does not change the frame clock. Unknown renderers fail at project load.
+Renderers are a discriminated union: Canvas renderers keep the existing `canvasSize`, `samplingFps` and `render(ctx, ...)` contract; media renderers expose a React `Component` rendered inside the composition. Existing custom Canvas renderers remain valid. Adding a renderer does not change the frame clock. Unknown renderers fail at project load.
+
+Video/Hybrid shot selection occurs on the raw output frame. Media renderers use a shot-local Remotion `Sequence`; `trimBefore` is in composition frames and embedded audio is always muted. The output soundtrack remains the only audio stream.
 
 A project may declare trusted Canvas 2D modules in `sceneModules`. The loader resolves each manifest path under the project's `scenes/` directory, rejects linked components and escapes, verifies the declared SHA256 and applies a static source policy before anything is bundled. It never imports or executes project modules in the Node host.
 
@@ -127,17 +132,22 @@ The generated entry calls `bindProjectSceneModules`, which validates the exporte
 ## 10. Reproducibility and CI
 
 - No unseeded randomness or wall-clock time in drawing. Project modules are given frame-derived values only, and the source policy rejects common clock, timer and randomness APIs.
-- Synthetic fixtures are generated deterministically by a committed pure-Node script; binaries are ignored by Git and no FFmpeg is required for tests.
-- Tests cover configuration, workspace isolation, write-boundary output restrictions, staging, cleanup, junction behavior, frame ownership, sampling isolation, multi-project loading, module path/hash/trust/source rejection, runtime binding, staged entry isolation, Git audit and provider absence.
+- Base WAV/PNG fixtures are generated deterministically by a committed pure-Node script; binaries are ignored by Git and base tests do not require FFmpeg. Media probe/render tests and media fixtures require FFmpeg/FFprobe and are skipped or reported NOT RUN when unavailable.
+- Tests cover configuration, workspace isolation, write-boundary output restrictions, staging, cleanup, junction behavior, frame ownership, sampling isolation, multi-project loading, module path/hash/trust/source rejection, runtime binding, staged entry isolation, media probe/timing/layer negatives, Git audit and provider absence.
 - `verify:modules` bundles both module projects and renders boundary/hold stills from the actual Remotion pipeline, writing evidence under each external project's `reports/` and `renders/`.
-- GitHub Actions validates Windows with Node 20, runs typecheck/tests, seeds an external synthetic workspace, ensures a browser, runs module bundles and still renders, and runs the publication and Git media audits. A short video render runs when system FFmpeg is available; otherwise the workflow records NOT RUN rather than claiming a video result. No artifacts or production media are uploaded.
+- `media:seed` generates synthetic video/PNG/WAV media inside a disposable external workspace; `media:verify` renders media stills and complete videos, checks decoded source colors, cuts, PNG alpha, overlay motion, media metadata and soundtrack-only audio, and writes external reports.
+- GitHub Actions validates Windows with Node 20, runs typecheck/tests, seeds an external synthetic workspace, ensures a browser, runs module bundles and still renders, and runs media seed/verify plus publication and Git media audits when FFmpeg/FFprobe are available. Skipped video/media steps are reported as NOT RUN, not as passed. No artifacts or production media are uploaded.
 - Render metadata must be verified with actual output, not source inference.
 
 ## 11. Known boundaries
 
-- Video/hybrid renderers are placeholders.
-- PCM WAV is the only audio probe implemented.
-- System FFmpeg is required for video encoding.
+- Video/Hybrid support approved local MP4/H.264 constant-frame-rate, zero-rotation sources only. VFR and rotated sources require preprocessing.
+- `endBehavior` is `reject` only; freeze/hold/end-of-file policies are not implemented.
+- Source in-points must align to output-frame boundaries. Source FPS may differ from output FPS, but exact source-frame selection is not claimed for unsupported VFR material.
+- Embedded video audio is muted; full audio mixing is not implemented.
+- Hybrid layers require 8-bit alpha PNGs and one built-in Canvas overlay; no arbitrary scene graph is provided.
+- System FFmpeg and FFprobe are required for media fixture generation, video probing and video encoding; FFmpeg is not bundled.
+- Synthetic media fixtures are generated externally and must not be committed.
 - Project scene modules currently support Canvas 2D only, must be self-contained (no imports) and expose a synchronous `render` function. Custom canvases are CSS-stretched to the output size; no automatic letterboxing is provided.
 - Module asset dependencies are validated and passed as approved public paths; no asynchronous image-loading helper is provided.
 - Scene-module validation combines path checks, SHA256 identity and a static source policy. It is not an OS sandbox or browser network sandbox; approved code is trusted code.

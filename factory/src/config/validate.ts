@@ -7,6 +7,9 @@ import type {
   Chapter,
   Cue,
   CueSource,
+  HybridLayerConfig,
+  HybridOverlayConfig,
+  MediaFit,
   NarrativeMode,
   ProjectAsset,
   ProjectAssetKind,
@@ -14,6 +17,10 @@ import type {
   SceneModuleParams,
   SceneParams,
   Shot,
+  ShotHybridMedia,
+  ShotMediaConfig,
+  ShotVideoMedia,
+  VideoSourceConfig,
   VisualConfig,
 } from './types';
 
@@ -21,6 +28,8 @@ const NARRATIVE_MODES: readonly NarrativeMode[] = ['narrative', 'abstract', 'lyr
 const CUE_SOURCES: readonly CueSource[] = ['measured', 'estimated', 'synthetic'];
 const ASSET_KINDS: readonly ProjectAssetKind[] = ['image', 'video', 'layer', 'audio-reference'];
 const APPROVALS: readonly AssetApproval[] = ['approved', 'pending', 'rejected', 'not_present'];
+const MEDIA_FITS: readonly MediaFit[] = ['contain', 'cover'];
+const MEDIA_RENDERERS = new Set(['video', 'hybrid']);
 const PROJECT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{2,63}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -174,16 +183,219 @@ const validateCue = (value: unknown, index: number, fps: number, durationInFrame
   };
 };
 
+const assertKeys = (
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+  field: string,
+): void => {
+  for (const key of Object.keys(value)) {
+    if (!allowed.includes(key)) fail(`${field} contains unsupported key ${key}`);
+  }
+};
+
+const assertApprovedAssetKind = (
+  assetById: ReadonlyMap<string, ProjectAsset>,
+  assetId: string,
+  kind: ProjectAsset['kind'],
+  field: string,
+): ProjectAsset => {
+  const asset = assetById.get(assetId);
+  if (!asset) fail(`${field} references unknown asset ${assetId}`);
+  if (asset.approval !== 'approved') {
+    fail(`${field} references asset ${assetId} with approval ${asset.approval}`);
+  }
+  if (asset.kind !== kind) {
+    fail(`${field} requires asset kind ${kind}, received ${asset.kind}`);
+  }
+  return asset;
+};
+
+const optionalNumber = (value: unknown, field: string, fallback: number): number => {
+  if (value === undefined) return fallback;
+  return number(value, field);
+};
+
+const validateVideoSource = (
+  value: unknown,
+  field: string,
+  assetById: ReadonlyMap<string, ProjectAsset>,
+  fps: number,
+  extraKeys: readonly string[] = [],
+): VideoSourceConfig => {
+  const source = record(value, field);
+  assertKeys(
+    source,
+    [
+      'assetId',
+      'sourceStartSeconds',
+      'fit',
+      'endBehavior',
+      'muted',
+      'positionX',
+      'positionY',
+      'scale',
+      ...extraKeys,
+    ],
+    field,
+  );
+  const assetId = text(source.assetId, `${field}.assetId`);
+  assertApprovedAssetKind(assetById, assetId, 'video', `${field}.assetId`);
+  const sourceStartSeconds = number(source.sourceStartSeconds, `${field}.sourceStartSeconds`);
+  if (sourceStartSeconds < 0) fail(`${field}.sourceStartSeconds must be non-negative`);
+  const alignedFrame = sourceStartSeconds * fps;
+  if (Math.abs(alignedFrame - Math.round(alignedFrame)) > 1e-6) {
+    fail(
+      `${field}.sourceStartSeconds must align to an output-frame boundary at ${fps}fps (received ${sourceStartSeconds})`,
+    );
+  }
+  const fit = oneOf(source.fit === undefined ? 'cover' : source.fit, MEDIA_FITS, `${field}.fit`);
+  const endBehavior = oneOf(
+    source.endBehavior === undefined ? 'reject' : source.endBehavior,
+    ['reject'] as const,
+    `${field}.endBehavior`,
+  );
+  const muted = source.muted === undefined ? true : boolean(source.muted, `${field}.muted`);
+  if (!muted) fail(`${field}.muted must be true; the soundtrack is the only authorized audio`);
+  const positionX = optionalNumber(source.positionX, `${field}.positionX`, 0);
+  const positionY = optionalNumber(source.positionY, `${field}.positionY`, 0);
+  const scale = optionalNumber(source.scale, `${field}.scale`, 1);
+  if (!(scale > 0) || scale > 20) fail(`${field}.scale must be greater than 0 and at most 20`);
+  return {
+    assetId,
+    sourceStartSeconds,
+    fit,
+    endBehavior,
+    muted: true,
+    positionX,
+    positionY,
+    scale,
+  };
+};
+
+const validateHybridLayer = (
+  value: unknown,
+  field: string,
+  assetById: ReadonlyMap<string, ProjectAsset>,
+  shotLength: number,
+): HybridLayerConfig => {
+  const layer = record(value, field);
+  assertKeys(
+    layer,
+    [
+      'assetId',
+      'order',
+      'opacity',
+      'fit',
+      'positionX',
+      'positionY',
+      'scale',
+      'visibleFromFrame',
+      'visibleToFrame',
+    ],
+    field,
+  );
+  const assetId = text(layer.assetId, `${field}.assetId`);
+  assertApprovedAssetKind(assetById, assetId, 'layer', `${field}.assetId`);
+  const order = integer(layer.order, `${field}.order`, 0);
+  if (order > 31) fail(`${field}.order must be at most 31`);
+  const opacity = optionalNumber(layer.opacity, `${field}.opacity`, 1);
+  if (opacity < 0 || opacity > 1) fail(`${field}.opacity must be in [0, 1]`);
+  const fit = oneOf(layer.fit === undefined ? 'cover' : layer.fit, MEDIA_FITS, `${field}.fit`);
+  const positionX = optionalNumber(layer.positionX, `${field}.positionX`, 0);
+  const positionY = optionalNumber(layer.positionY, `${field}.positionY`, 0);
+  const scale = optionalNumber(layer.scale, `${field}.scale`, 1);
+  if (!(scale > 0) || scale > 20) fail(`${field}.scale must be greater than 0 and at most 20`);
+  const visibleFromFrame = integer(layer.visibleFromFrame ?? 0, `${field}.visibleFromFrame`, 0);
+  const visibleToFrame = integer(
+    layer.visibleToFrame ?? shotLength,
+    `${field}.visibleToFrame`,
+    0,
+  );
+  if (visibleFromFrame >= visibleToFrame) fail(`${field} visibility range must be non-empty`);
+  if (visibleToFrame > shotLength) {
+    fail(`${field}.visibleToFrame exceeds the shot-local duration ${shotLength}`);
+  }
+  return {
+    assetId,
+    order,
+    opacity,
+    fit,
+    positionX,
+    positionY,
+    scale,
+    visibleFromFrame,
+    visibleToFrame,
+  };
+};
+
+const validateOverlay = (value: unknown, field: string): HybridOverlayConfig => {
+  const overlay = record(value, field);
+  assertKeys(overlay, ['kind', 'intensity', 'color'], field);
+  const kind = oneOf(overlay.kind, ['rain', 'orbits', 'scan'] as const, `${field}.kind`);
+  const intensity = optionalNumber(overlay.intensity, `${field}.intensity`, 0.5);
+  if (intensity < 0 || intensity > 1) fail(`${field}.intensity must be in [0, 1]`);
+  const color = optionalText(overlay.color, `${field}.color`);
+  return {kind, intensity, color};
+};
+
+const validateMedia = (
+  value: unknown,
+  field: string,
+  renderer: string,
+  assetById: ReadonlyMap<string, ProjectAsset>,
+  shotLength: number,
+  fps: number,
+): ShotMediaConfig => {
+  const media = record(value, field);
+  const kind = oneOf(media.kind, ['video', 'hybrid'] as const, `${field}.kind`);
+  if (kind !== renderer) {
+    fail(`${field}.kind must match renderer "${renderer}", received "${kind}"`);
+  }
+  if (kind === 'video') {
+    return {
+      kind: 'video',
+      ...validateVideoSource(media, field, assetById, fps, ['kind']),
+    } satisfies ShotVideoMedia;
+  }
+  assertKeys(media, ['kind', 'video', 'layers', 'overlay'], field);
+  const video = validateVideoSource(media.video, `${field}.video`, assetById, fps);
+  const rawLayers = array(media.layers, `${field}.layers`);
+  if (rawLayers.length === 0) fail(`${field}.layers must contain at least one layer`);
+  if (rawLayers.length > 16) fail(`${field}.layers must contain at most 16 layers`);
+  const layers = rawLayers.map((layer, index) =>
+    validateHybridLayer(layer, `${field}.layers[${index}]`, assetById, shotLength),
+  );
+  const orders = new Set<number>();
+  for (const layer of layers) {
+    if (orders.has(layer.order)) fail(`${field}.layers contains duplicate order ${layer.order}`);
+    orders.add(layer.order);
+  }
+  const overlay = validateOverlay(media.overlay, `${field}.overlay`);
+  return {kind: 'hybrid', video, layers, overlay} satisfies ShotHybridMedia;
+};
+
 const validateShot = (
   value: unknown,
   field: string,
   assetById: ReadonlyMap<string, ProjectAsset>,
+  fps: number,
 ): Shot => {
   const shot = record(value, field);
   const startFrame = integer(shot.startFrame, `${field}.startFrame`);
   const endFrame = integer(shot.endFrame, `${field}.endFrame`);
   if (endFrame <= startFrame) fail(`${field} must satisfy startFrame < endFrame`);
+  const renderer = text(shot.renderer, `${field}.renderer`);
+  const isMediaRenderer = MEDIA_RENDERERS.has(renderer);
+  if (!isMediaRenderer && shot.media !== undefined) {
+    fail(`${field}.media is only valid for the video and hybrid renderers`);
+  }
+  if (isMediaRenderer && shot.media === undefined) {
+    fail(`${field}.media is required for the ${renderer} renderer`);
+  }
   const params = validateParams(shot.params, `${field}.params`);
+  if (isMediaRenderer && params.assetId) {
+    fail(`${field}.params.assetId is not allowed for ${renderer}; use media.assetId`);
+  }
   if (params.assetId) {
     const asset = assetById.get(params.assetId);
     if (!asset) fail(`${field}.params.assetId references unknown asset ${params.assetId}`);
@@ -191,7 +403,17 @@ const validateShot = (
       fail(`${field}.params.assetId references asset ${params.assetId} with approval ${asset.approval}`);
     }
   }
-  const renderer = text(shot.renderer, `${field}.renderer`);
+  const media =
+    shot.media === undefined
+      ? undefined
+      : validateMedia(
+          shot.media,
+          `${field}.media`,
+          renderer,
+          assetById,
+          endFrame - startFrame,
+          fps,
+        );
   const moduleParams = validateModuleParams(shot.moduleParams, `${field}.moduleParams`);
   if (moduleParams !== undefined && !renderer.startsWith(PROJECT_SCENE_RENDERER_PREFIX)) {
     fail(`${field}.moduleParams is only valid for a declared project scene module renderer`);
@@ -203,6 +425,7 @@ const validateShot = (
     renderer,
     params,
     moduleParams,
+    media,
   };
 };
 
@@ -210,6 +433,7 @@ const validateChapter = (
   value: unknown,
   index: number,
   assetById: ReadonlyMap<string, ProjectAsset>,
+  fps: number,
 ): Chapter => {
   const chapter = record(value, `chapters[${index}]`);
   const startFrame = integer(chapter.startFrame, `chapters[${index}].startFrame`);
@@ -218,7 +442,7 @@ const validateChapter = (
   const rawShots = array(chapter.shots, `chapters[${index}].shots`);
   if (rawShots.length === 0) fail(`chapters[${index}] must contain at least one shot`);
   const shots = rawShots.map((shot, shotIndex) =>
-    validateShot(shot, `chapters[${index}].shots[${shotIndex}]`, assetById),
+    validateShot(shot, `chapters[${index}].shots[${shotIndex}]`, assetById, fps),
   );
   uniqueIds(shots, `chapters[${index}].shots`);
 
@@ -316,7 +540,7 @@ export const validateProjectConfig = (
   const chaptersRaw = array(config.chapters, 'chapters');
   if (chaptersRaw.length === 0) fail('chapters must not be empty');
   const chapters = chaptersRaw.map((chapter, index) =>
-    validateChapter(chapter, index, assetById),
+    validateChapter(chapter, index, assetById, fps),
   );
   uniqueIds(chapters, 'chapters');
   let cursor = 0;

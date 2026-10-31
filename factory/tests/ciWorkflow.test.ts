@@ -84,6 +84,8 @@ test('G12: workflow runs the required engine and security commands', () => {
     'npm run seed:examples',
     'npx remotion browser ensure',
     'npm run verify:modules',
+    'npm run media:seed',
+    'npm run media:verify',
     'npm run render:project',
     'npm run audit:publication',
     'npm run audit:git',
@@ -93,7 +95,8 @@ test('G12: workflow runs the required engine and security commands', () => {
   assert.match(workflow, /windows-latest/);
   assert.match(workflow, /node-version: 20/);
   assert.match(workflow, /steps\.ffmpeg\.outputs\.available/);
-  assert.match(workflow, /NOT RUN: system FFmpeg is unavailable/);
+  assert.match(workflow, /Get-Command ffprobe/);
+  assert.match(workflow, /NOT RUN: system FFmpeg\/FFprobe is unavailable/);
   assert.doesNotMatch(workflow, /ubuntu-latest|node: \[/);
   assert.doesNotMatch(
     workflow,
@@ -121,16 +124,45 @@ test('G12: workspace is initialized from RUNNER_TEMP via GITHUB_ENV before seedi
   const configureIndex = names.indexOf('Configure isolated synthetic workspace');
   const seedIndex = names.indexOf('Seed synthetic external workspace');
   const browserIndex = names.indexOf('Ensure Remotion browser');
+  const provisionIndex = names.indexOf('Provision pinned FFmpeg/FFprobe');
   const moduleIndex = names.indexOf('Module bundle and still render evidence');
   const ffmpegIndex = names.indexOf('Check FFmpeg availability');
+  const mediaSeedIndex = names.indexOf('Seed synthetic media workspace');
+  const mediaVerifyIndex = names.indexOf('Verify Video and Hybrid renderers');
+  const shortVideoIndex = names.indexOf('Short synthetic video render');
+  const recordIndex = names.indexOf('Record media/video render limitation');
   assert.ok(configureIndex >= 0 && seedIndex > configureIndex, 'configure must precede seeding');
   assert.ok(browserIndex > seedIndex, 'browser setup must follow seeding');
-  assert.ok(moduleIndex > browserIndex, 'module evidence must follow browser setup');
+  assert.ok(provisionIndex > browserIndex, 'FFmpeg provisioning must follow browser setup');
+  assert.ok(moduleIndex > provisionIndex, 'module evidence must follow FFmpeg provisioning');
   assert.ok(ffmpegIndex > moduleIndex, 'FFmpeg check must follow module evidence');
-  assert.ok(names.includes('Short synthetic video render'));
-  assert.ok(names.includes('Record video render limitation'));
+  assert.ok(mediaSeedIndex > ffmpegIndex, 'media seeding must follow the FFmpeg check');
+  assert.ok(mediaVerifyIndex > mediaSeedIndex, 'media verification must follow media seeding');
+  assert.ok(shortVideoIndex > mediaVerifyIndex, 'module video render must follow media verification');
+  assert.ok(recordIndex > shortVideoIndex, 'limitation recording must follow video steps');
   assert.ok(names.includes('Publication audit'));
   assert.ok(names.includes('Git media audit'));
+
+  const provision = steps[provisionIndex];
+  const provisionText = provision.lines.join('\n');
+  assert.match(provisionText, /autobuild-2026-10-30-13-01/);
+  assert.match(provisionText, /ffmpeg-n9\.0\.2-39-g7adfbe40dc-win64-gpl-shared-9\.0\.zip/);
+  assert.match(provisionText, /7c09a4c6bd73a5013963f06b1c6175326605cbc2585444ebe0f740ef4f35b4c9/);
+  assert.match(provisionText, /Get-FileHash/);
+  assert.match(provisionText, /Expand-Archive/);
+  assert.match(provisionText, /ffprobe\.exe/);
+  assert.match(provisionText, /GITHUB_PATH/);
+  assert.doesNotMatch(workflow, /choco install|winget install|ffmpeg-release-full/i);
+
+  const mediaSeed = steps[mediaSeedIndex];
+  const mediaVerify = steps[mediaVerifyIndex];
+  const shortVideo = steps[shortVideoIndex];
+  const limitation = steps[recordIndex];
+  assert.match(mediaSeed.lines.join('\n'), /if: steps\.ffmpeg\.outputs\.available == 'true'/);
+  assert.match(mediaVerify.lines.join('\n'), /if: steps\.ffmpeg\.outputs\.available == 'true'/);
+  assert.match(shortVideo.lines.join('\n'), /if: steps\.ffmpeg\.outputs\.available == 'true'/);
+  assert.match(limitation.lines.join('\n'), /if: steps\.ffmpeg\.outputs\.available != 'true'/);
+  assert.match(limitation.lines.join('\n'), /NOT RUN: system FFmpeg\/FFprobe is unavailable/);
 });
 
 test('G12: the original workflow-level runner.temp expression fails validation', () => {

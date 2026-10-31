@@ -6,6 +6,9 @@ import type {LoadedAsset, LoadedProject, ProjectConfig} from '../config/types';
 import {validateProjectConfig} from '../config/validate';
 import {sha256File} from '../media/hash';
 import {readWavMetadata} from '../media/wav';
+import {probeVideo} from '../media/videoProbe';
+import {probeLayerPng} from '../media/pngProbe';
+import {assertMediaTimelines} from '../media/mediaTimeline';
 import {resolveShots, assertShotCoverage} from '../timeline/resolver';
 import {DEFAULT_SCENE_REGISTRY} from '../scenes/registry';
 import type {SceneRegistry} from '../scenes/types';
@@ -108,11 +111,25 @@ export const loadProject = (
         `Asset SHA256 mismatch for ${asset.id}: expected ${asset.sha256}, received ${hash}`,
       );
     }
-    return {...asset, absolutePath, hashVerified: true};
+    const loaded: LoadedAsset = {...asset, absolutePath, hashVerified: true};
+    if (asset.kind === 'video') {
+      loaded.videoMetadata = probeVideo(absolutePath, asset.id);
+    }
+    if (asset.kind === 'layer') {
+      probeLayerPng(absolutePath, asset.id);
+    }
+    return loaded;
   });
 
   const shots = resolveShots(config.chapters);
   assertShotCoverage(shots, durationInFrames);
+  assertMediaTimelines(config, assets, config.output.fps);
+
+  const videoMetadata = Object.fromEntries(
+    assets
+      .filter((asset) => asset.videoMetadata)
+      .map((asset) => [asset.id, asset.videoMetadata]),
+  );
 
   return {
     config,
@@ -124,7 +141,7 @@ export const loadProject = (
     shots,
     assets,
     sceneModules,
-    renderProject: toRenderProject(config, durationInFrames),
+    renderProject: toRenderProject(config, durationInFrames, videoMetadata),
   };
 };
 

@@ -59,6 +59,66 @@ export type SceneParams = {
   label?: string;
 };
 
+export type MediaFit = 'contain' | 'cover';
+export type VideoEndBehavior = 'reject';
+
+export type VideoSourceConfig = {
+  assetId: string;
+  sourceStartSeconds: number;
+  fit: MediaFit;
+  endBehavior: VideoEndBehavior;
+  muted: true;
+  positionX: number;
+  positionY: number;
+  scale: number;
+};
+
+export type ShotVideoMedia = VideoSourceConfig & {
+  kind: 'video';
+};
+
+export type HybridLayerConfig = {
+  assetId: string;
+  order: number;
+  opacity: number;
+  fit: MediaFit;
+  positionX: number;
+  positionY: number;
+  scale: number;
+  visibleFromFrame: number;
+  visibleToFrame: number;
+};
+
+export type HybridOverlayKind = 'rain' | 'orbits' | 'scan';
+
+export type HybridOverlayConfig = {
+  kind: HybridOverlayKind;
+  intensity: number;
+  color?: string;
+};
+
+export type ShotHybridMedia = {
+  kind: 'hybrid';
+  video: VideoSourceConfig;
+  layers: HybridLayerConfig[];
+  overlay: HybridOverlayConfig;
+};
+
+export type ShotMediaConfig = ShotVideoMedia | ShotHybridMedia;
+
+export type VideoAssetMetadata = {
+  assetId: string;
+  container: string;
+  codec: 'h264';
+  width: number;
+  height: number;
+  fps: number;
+  durationSeconds: number;
+  hasAudio: boolean;
+  pixelFormat: string | null;
+  rotation: number;
+};
+
 export type Shot = {
   id: string;
   startFrame: number;
@@ -66,6 +126,7 @@ export type Shot = {
   renderer: string;
   params: SceneParams;
   moduleParams?: SceneModuleParams;
+  media?: ShotMediaConfig;
 };
 
 export type Chapter = {
@@ -190,6 +251,7 @@ export type RenderProjectSnapshot = {
     durationPolicy: DurationPolicy;
   };
   assets: RenderProjectAsset[];
+  mediaAssets: Record<string, VideoAssetMetadata>;
   publicAssets: Record<string, string>;
   audioPublicPath?: string;
 };
@@ -204,6 +266,7 @@ export type ResolvedShot = {
 export type LoadedAsset = ProjectAsset & {
   absolutePath: string | null;
   hashVerified: boolean;
+  videoMetadata?: VideoAssetMetadata;
 };
 
 export type LoadedSceneModule = SceneModuleConfig & {

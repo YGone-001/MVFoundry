@@ -21,6 +21,7 @@
     "factory/tests",
     "factory/scripts",
     "factory/examples/projects",
+    "factory/examples/media-projects",
     ".agents/skills/music-video-director",
     ".agents/skills/visual-identity-continuity",
     ".agents/skills/ai-shot-production",

@@ -45,7 +45,26 @@ No direct dependency on Zod exists. Remotion 4.0.539 pins `zod` to exactly `4.5.
 
 Decision: **accept and track** the development/build-time advisory, do not suppress it, and do not force a dependency change. Revisit in a dedicated Remotion upgrade phase with full test evidence.
 
-## P1-B dependency impact
+## Video/Hybrid dependency impact
+
+Video/Hybrid rendering uses `OffthreadVideo` from the already-installed `remotion@4.0.539` package. It does not add `@remotion/media` or any new npm dependency. Media probing and synthetic fixture generation use the external system `ffprobe`/`ffmpeg` toolchain, which is not bundled or committed. PNG layer validation is a small local IHDR reader with no new dependency.
+
+The dependency entries and lockfile are unchanged by this feature; the advisory set above remains visible and unresolved. FFmpeg is a separately installed system tool with its own license and decoder security surface; see `THIRD_PARTY_NOTICES.md`.
+
+## CI FFmpeg pin
+
+Windows CI provisions a transient FFmpeg/FFprobe pair from the BtbN FFmpeg-Builds release:
+
+```text
+Release tag: autobuild-2026-10-30-13-01
+Asset:       ffmpeg-n9.0.2-39-g7adfbe40dc-win64-gpl-shared-9.0.zip
+SHA256:      7c09a4c6bd73a5013963f06b1c6175326605cbc2585444ebe0f740ef4f35b4c9
+License:     GPL shared Windows build (transient CI test tooling)
+```
+
+The workflow downloads that exact asset, compares the SHA256 with `Get-FileHash`, extracts it under `RUNNER_TEMP`, and verifies both `ffmpeg.exe` and `ffprobe.exe` before any media step. The binaries are not committed, redistributed by the repository, or uploaded as artifacts. The GPL build is used because the engine's `libx264` encoding path requires it; this is a CI test dependency, not a bundled engine component. If the pinned asset or checksum is unavailable, CI fails rather than silently skipping with a successful media claim.
+
+## External scene-module dependency impact
 
 External scene module loading introduces no new runtime or development dependencies. It uses the existing TypeScript compiler for static source analysis, the existing Remotion webpack bundler for the staged entry and the existing React/Remotion stack for rendering. The dependency entries in `package.json` and `package-lock.json` are unchanged by this feature; the advisory set above remains visible and unresolved.
 

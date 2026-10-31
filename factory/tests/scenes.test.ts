@@ -4,7 +4,11 @@ import assert from 'node:assert/strict';
 import {loadProject} from '../src/project/loadProject';
 import {computeAnimationTick} from '../src/timeline/frameClock';
 import {createDefaultSceneRegistry, DEFAULT_SCENE_REGISTRY} from '../src/scenes/registry';
-import {SceneRegistry} from '../src/scenes/types';
+import {
+  SceneRegistry,
+  type CanvasSceneRenderer,
+  type MediaSceneRenderer,
+} from '../src/scenes/types';
 import {SceneRenderError} from '../src/errors';
 import {REPO_ROOT, cloneProject, makeWorkspace} from './helpers';
 
@@ -24,33 +28,25 @@ test('built-in renderers expose sizes and sampling rates', () => {
   const shot = pixel.renderProject.chapters[0].shots[0];
   const layeredShot = layered.renderProject.chapters[0].shots[0];
 
-  const pixelRenderer = DEFAULT_SCENE_REGISTRY.get('pixel-canvas');
+  const pixelRenderer = DEFAULT_SCENE_REGISTRY.get('pixel-canvas') as CanvasSceneRenderer;
   assert.deepEqual(pixelRenderer.canvasSize(pixel.renderProject, shot), {width: 480, height: 270});
   assert.equal(pixelRenderer.samplingFps(pixel.renderProject, shot), 12);
 
-  const layeredRenderer = DEFAULT_SCENE_REGISTRY.get('layered-canvas');
+  const layeredRenderer = DEFAULT_SCENE_REGISTRY.get('layered-canvas') as CanvasSceneRenderer;
   assert.deepEqual(layeredRenderer.canvasSize(layered.renderProject, layeredShot), {
     width: 1080,
     height: 1350,
   });
   assert.equal(layeredRenderer.samplingFps(layered.renderProject, layeredShot), 30);
-  assert.throws(
-    () => DEFAULT_SCENE_REGISTRY.get('video').render({} as CanvasRenderingContext2D, {
-      project: layered.renderProject,
-      shot: layeredShot,
-      frame: {
-        outputFrame: 0,
-        outputTime: 0,
-        localFrame: 0,
-        localTime: 0,
-        animationTick: 0,
-        animationTime: 0,
-        samplingFps: 30,
-      },
-      publicAssets: {},
-    }),
-    SceneRenderError,
-  );
+
+  const videoRenderer = DEFAULT_SCENE_REGISTRY.get('video') as MediaSceneRenderer;
+  const hybridRenderer = DEFAULT_SCENE_REGISTRY.get('hybrid') as MediaSceneRenderer;
+  assert.equal(videoRenderer.mode, 'media');
+  assert.equal(hybridRenderer.mode, 'media');
+  assert.equal(typeof videoRenderer.Component, 'function');
+  assert.equal(typeof hybridRenderer.Component, 'function');
+  assert.equal('render' in videoRenderer, false);
+  assert.equal('render' in hybridRenderer, false);
 });
 
 test('pixel renderer supports a project-specific internal resolution', () => {
@@ -62,7 +58,7 @@ test('pixel renderer supports a project-specific internal resolution', () => {
     workspaceRoot: workspace,
     engineRoot: REPO_ROOT,
   });
-  const renderer = DEFAULT_SCENE_REGISTRY.get('pixel-canvas');
+  const renderer = DEFAULT_SCENE_REGISTRY.get('pixel-canvas') as CanvasSceneRenderer;
   const shot = small.renderProject.chapters[0].shots[0];
   assert.deepEqual(renderer.canvasSize(small.renderProject, shot), {width: 320, height: 180});
   assert.equal(renderer.samplingFps(small.renderProject, shot), 12);

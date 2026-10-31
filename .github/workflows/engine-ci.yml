@@ -37,25 +37,53 @@ jobs:
         run: npm run seed:examples
       - name: Ensure Remotion browser
         run: npx remotion browser ensure
+      - name: Provision pinned FFmpeg/FFprobe
+        shell: pwsh
+        run: |
+          $tag = 'autobuild-2026-10-30-13-01'
+          $archive = 'ffmpeg-n9.0.2-39-g7adfbe40dc-win64-gpl-shared-9.0.zip'
+          $expected = '7c09a4c6bd73a5013963f06b1c6175326605cbc2585444ebe0f740ef4f35b4c9'
+          $root = Join-Path $env:RUNNER_TEMP 'ffmpeg-pinned'
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          $zip = Join-Path $root $archive
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/$tag/$archive"
+          curl.exe --fail --location --silent --show-error --output $zip $url
+          if ($LASTEXITCODE -ne 0) { throw "Pinned FFmpeg download failed: $url" }
+          $actual = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "Pinned FFmpeg SHA256 mismatch: $actual" }
+          Expand-Archive -Path $zip -DestinationPath $root -Force
+          $ffmpeg = Get-ChildItem -Path $root -Recurse -Filter ffmpeg.exe -File | Select-Object -First 1
+          $ffprobe = Get-ChildItem -Path $root -Recurse -Filter ffprobe.exe -File | Select-Object -First 1
+          if (-not $ffmpeg -or -not $ffprobe) { throw 'Pinned FFmpeg archive did not contain ffmpeg.exe and ffprobe.exe' }
+          $bin = $ffmpeg.Directory.FullName
+          Add-Content -Path $env:GITHUB_PATH -Value $bin
+          & $ffmpeg.FullName -version | Select-Object -First 1
+          & $ffprobe.FullName -version | Select-Object -First 1
       - name: Module bundle and still render evidence
         run: npm run verify:modules
       - name: Check FFmpeg availability
         id: ffmpeg
         shell: pwsh
         run: |
-          if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
+          if ((Get-Command ffmpeg -ErrorAction SilentlyContinue) -and (Get-Command ffprobe -ErrorAction SilentlyContinue)) {
             "available=true" >> $env:GITHUB_OUTPUT
           } else {
             "available=false" >> $env:GITHUB_OUTPUT
-            Write-Output "NOT RUN: system FFmpeg is unavailable; short video encode skipped."
+            Write-Output "NOT RUN: system FFmpeg/FFprobe is unavailable; media and short video encodes skipped."
           }
+      - name: Seed synthetic media workspace
+        if: steps.ffmpeg.outputs.available == 'true'
+        run: npm run media:seed
+      - name: Verify Video and Hybrid renderers
+        if: steps.ffmpeg.outputs.available == 'true'
+        run: npm run media:verify
       - name: Short synthetic video render
         if: steps.ffmpeg.outputs.available == 'true'
         run: npm run render:project -- --project synthetic-module-pixel-demo --mode video --frames 0-11
-      - name: Record video render limitation
+      - name: Record media/video render limitation
         if: steps.ffmpeg.outputs.available != 'true'
         run: |
-          Write-Output "NOT RUN: system FFmpeg is unavailable; still renders completed above."
+          Write-Output "NOT RUN: system FFmpeg/FFprobe is unavailable; media and module video renders were skipped, still evidence ran."
       - name: Publication audit
         run: npm run audit:publication
       - name: Git media audit

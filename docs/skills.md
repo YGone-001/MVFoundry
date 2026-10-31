@@ -9,8 +9,8 @@ Five complete Skills live in `.agents/skills/`:
 | `music-video-director` | Song structure, treatment, chapters, cues and integer-frame shot planning |
 | `visual-identity-continuity` | Style profiles, palettes, character/environment contracts and continuity audits |
 | `ai-shot-production` | Provider-neutral shot contracts, keyframes, hashes, provenance and authorization |
-| `remotion-mv-compositor` | Frame clock, scene registry, renderer adapters, trusted project module bundling, local media and rendering |
-| `music-video-quality-gate` | Evidence-based acceptance, module isolation/render checks and PASS/FAIL/BLOCKED/NOT RUN reporting |
+| `remotion-mv-compositor` | Frame clock, scene registry, Canvas/Video/Hybrid renderers, trusted project module bundling, local media and rendering |
+| `music-video-quality-gate` | Evidence-based acceptance, media/module isolation and render checks, PASS/FAIL/BLOCKED/NOT RUN reporting |
 
 Each has YAML frontmatter whose `name` matches its folder and contains activation conditions, input and output contracts, workflow, prohibited actions, acceptance checks and failure behavior. They are song-independent and contain no private references or production prompts.
 

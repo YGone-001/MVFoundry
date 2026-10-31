@@ -1,4 +1,4 @@
-import {AbsoluteFill, Audio, Img, staticFile, useCurrentFrame, useVideoConfig} from 'remotion';
+import {AbsoluteFill, Audio, Img, staticFile, useCurrentFrame} from 'remotion';
 import {useLayoutEffect, useMemo, useRef} from 'react';
 import type {RenderProjectSnapshot, RenderProjectShot} from '../config/types';
 import {createDefaultSceneRegistry, DEFAULT_SCENE_REGISTRY} from '../scenes/registry';
@@ -16,7 +16,6 @@ const flattenShots = (project: RenderProjectSnapshot): RenderProjectShot[] =>
 
 export const FactoryFilm: React.FC<FactoryFilmProps> = ({project, extraRenderers}) => {
   const frame = useCurrentFrame();
-  const {fps} = useVideoConfig();
   const ref = useRef<HTMLCanvasElement>(null);
 
   const registry = useMemo(() => {
@@ -41,16 +40,25 @@ export const FactoryFilm: React.FC<FactoryFilmProps> = ({project, extraRenderers
   );
   const shot = resolveShotAtFrame(resolvedShots, frame, project.output.durationInFrames);
   const renderer = registry.get(shot.shot.renderer);
-  const size = renderer.canvasSize(project, shot.shot as RenderProjectShot);
-  const samplingFps = renderer.samplingFps(project, shot.shot as RenderProjectShot);
-  const isPixel = renderer.pixelated ?? renderer.kind === 'pixel-canvas';
-  const backgroundPublicPath = shot.shot.params.assetId
-    ? project.publicAssets[shot.shot.params.assetId]
-    : undefined;
+  const MediaComponent = renderer.mode === 'media' ? renderer.Component : null;
+  const canvasRenderer = renderer.mode === 'media' ? null : renderer;
+  const size = canvasRenderer
+    ? canvasRenderer.canvasSize(project, shot.shot as RenderProjectShot)
+    : null;
+  const samplingFps = canvasRenderer
+    ? canvasRenderer.samplingFps(project, shot.shot as RenderProjectShot)
+    : null;
+  const isPixel = canvasRenderer
+    ? canvasRenderer.pixelated ?? canvasRenderer.kind === 'pixel-canvas'
+    : false;
+  const backgroundPublicPath =
+    canvasRenderer && shot.shot.params.assetId
+      ? project.publicAssets[shot.shot.params.assetId]
+      : undefined;
 
   useLayoutEffect(() => {
     const canvas = ref.current;
-    if (!canvas) return;
+    if (!canvas || !canvasRenderer || !size || samplingFps === null) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
@@ -67,13 +75,13 @@ export const FactoryFilm: React.FC<FactoryFilmProps> = ({project, extraRenderers
       samplingFps,
       project.output.durationInFrames,
     );
-    renderer.render(ctx, {
+    canvasRenderer.render(ctx, {
       project,
       shot: shot.shot as RenderProjectShot,
       frame: frameInfo,
       publicAssets: project.publicAssets,
     });
-  }, [frame, project, samplingFps, shot, size.height, size.width, renderer]);
+  }, [canvasRenderer, frame, project, samplingFps, shot, size?.height, size?.width]);
 
   return (
     <AbsoluteFill
@@ -82,30 +90,42 @@ export const FactoryFilm: React.FC<FactoryFilmProps> = ({project, extraRenderers
       data-renderer={renderer.kind}
       style={{backgroundColor: '#000'}}
     >
-      {backgroundPublicPath ? (
-        <Img
-          src={staticFile(backgroundPublicPath)}
-          style={{
-            position: 'absolute',
-            inset: 0,
-            width: '100%',
-            height: '100%',
-            objectFit: 'cover',
-          }}
+      {MediaComponent ? (
+        <MediaComponent
+          project={project}
+          shot={shot.shot as RenderProjectShot}
+          publicAssets={project.publicAssets}
         />
-      ) : null}
-      <canvas
-        ref={ref}
-        width={size.width}
-        height={size.height}
-        style={{
-          position: 'absolute',
-          inset: 0,
-          width: '100%',
-          height: '100%',
-          imageRendering: isPixel ? 'pixelated' : 'auto',
-        }}
-      />
+      ) : (
+        <>
+          {backgroundPublicPath ? (
+            <Img
+              src={staticFile(backgroundPublicPath)}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+              }}
+            />
+          ) : null}
+          {canvasRenderer && size ? (
+            <canvas
+              ref={ref}
+              width={size.width}
+              height={size.height}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                imageRendering: isPixel ? 'pixelated' : 'auto',
+              }}
+            />
+          ) : null}
+        </>
+      )}
       {project.audioPublicPath ? <Audio src={staticFile(project.audioPublicPath)} /> : null}
     </AbsoluteFill>
   );

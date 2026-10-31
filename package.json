@@ -13,6 +13,8 @@
     "test": "npm run fixtures && npm run build && node --test factory/dist/tests",
     "compositions": "remotion compositions factory/src/entry.tsx",
     "seed:examples": "npm run build && npm run fixtures && node factory/scripts/seed-workspace.mjs",
+    "media:seed": "npm run build && node factory/scripts/seed-media-workspace.mjs",
+    "media:verify": "npm run build && node factory/scripts/verify-media-render.mjs",
     "render:project": "npm run build && node factory/scripts/render-project.mjs",
     "verify:modules": "npm run build && node factory/scripts/verify-module-render.mjs",
     "audit:git": "npm run build && node factory/scripts/audit-git.mjs",

@@ -63,14 +63,24 @@ Do not treat plans, prior reports or user summaries as proof of the current file
 - Bind module identity, contract version, type, parameter schema and approved asset dependencies at bundle load. Unknown parameters or missing assets stop rendering.
 - Do not serialize module functions through Remotion `inputProps`.
 
+### Media assets and renderers
+
+- Video sources must be approved project assets of kind `video`, project-relative, SHA256-verified and FFprobe-validated before rendering. Only local MP4/H.264 constant-frame-rate, zero-rotation sources are supported.
+- Validate source in-point alignment to the output frame, source duration against the shot range, fit/scale/position and the fail-closed `reject` end behavior.
+- Embedded video audio must remain muted. The approved project soundtrack is the only authorized audio output.
+- Hybrid layers must be approved `layer` assets and 8-bit RGBA or grayscale-alpha PNGs. Enforce explicit order, opacity, fit/position/scale, shot-local visibility and supported overlays.
+- Do not add HTTP media sources, unrestricted remote URLs or cross-project asset references.
+- Synthetic video/PNG/WAV fixtures are generated with FFmpeg into an external disposable workspace; never commit generated media or place it in the engine repository.
+- Do not use a real production workspace for synthetic media seeding or verification.
+
 ### Timeline and rendering
 
 - Integer output frames are the canonical editing clock; scene ranges are half-open `[startFrame, endFrame)`.
 - Resolve the shot from the raw output frame before applying renderer sampling.
 - Renderer sampling is local to the selected renderer. Use `floor(localFrame * samplingFps / outputFps)`; never quantize before selection.
+- Video/Hybrid media playback is inside a shot-local Sequence; Remotion `trimBefore` is in composition-frame units.
 - Soundtrack timing is authoritative and is never retimed by animation sampling.
 - Do not make one song's duration, scene count, resolution, fps or pixel profile a global constant.
-- Video and hybrid renderers are typed placeholders; they must fail closed.
 - Local rendering uses Remotion `renderFrames` plus system FFmpeg in the current environment.
 
 ### Skills and evidence
@@ -95,6 +105,8 @@ npm run typecheck
 npm test
 npm run compositions
 npm run seed:examples
+npm run media:seed
+npm run media:verify
 npm run render:project -- --project synthetic-pixel-demo --mode video --frames 0-23
 npm run render:project -- --project synthetic-module-pixel-demo --mode video --frames 0-47
 npm run verify:modules
@@ -102,7 +114,7 @@ npm run audit:git
 npm run audit:publication
 ```
 
-Set `MV_WORKSPACE_ROOT` to a path outside this repository. Set `REMOTION_BROWSER_EXECUTABLE` or `CHROME_PATH` when Remotion cannot locate a browser. `npx remotion browser ensure` installs a managed browser for CI or a fresh host.
+Set `MV_WORKSPACE_ROOT` to a path outside this repository. Set `REMOTION_BROWSER_EXECUTABLE` or `CHROME_PATH` when Remotion cannot locate a browser. `npx remotion browser ensure` installs a managed browser for CI or a fresh host. Media fixture generation/probing and video encoding require system FFmpeg and FFprobe.
 
 ## Skill routing
 
@@ -119,4 +131,4 @@ Agents that do not auto-discover `.agents/skills` must read this file and the fi
 
 ## Scope boundary
 
-The reusable engine supports declarative renderers and trusted project-local Canvas 2D scene modules. It does not start a music-video production, generate media, migrate a private production, call providers, implement video/hybrid renderers or publish production scenes. Stop before unauthorized provider, publication or production work.
+The reusable engine supports declarative renderers, trusted project-local Canvas 2D scene modules, and local Video/Hybrid media composition. It does not start a music-video production, generate media with AI, migrate a private production, call providers, implement full audio mixing or publish production scenes. Stop before unauthorized provider, publication or production work.

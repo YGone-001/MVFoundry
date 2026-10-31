@@ -107,7 +107,8 @@ The folder name must equal `projectId`. The loader reads only `project.json` and
 | `cues[].source` | `measured`, `estimated` or `synthetic` |
 | chapter/shot frames | integers, `startFrame < endFrame`, chapters cover `[0, duration)` exactly, shots cover each chapter exactly |
 | `renderer` | must be registered in the scene registry; `project:<id>` must reference a declared scene module |
-| `params.assetId` | must reference an existing `approved` asset |
+| `params.assetId` | must reference an existing `approved` asset; not allowed on `video`/`hybrid` shots |
+| `media` | required for `video`/`hybrid`, forbidden for canvas renderers; see §4.2 |
 | `moduleParams` | optional JSON object of strings, finite numbers and booleans; only valid on `project:<id>` renderers |
 | `sceneModules` | optional array (max 64) of trusted Canvas 2D module declarations |
 | `sceneModules[].id` | lowercase letters/digits/hyphens, 3-64 chars, unique |
@@ -147,11 +148,11 @@ The policy is part of the project contract. The engine never assumes 4919 frames
 |---|---|---|---|
 | `pixel-canvas` | `visual.pixel.internalWidth × internalHeight` | `visual.pixel.samplingFps` | `background`, `accent`, `secondary`, `bars`, `motion`, `label` |
 | `layered-canvas` | output width × height | output fps | `background`, `accent`, `secondary`, `assetId`, `motion`, `label` |
+| `video` | output | output fps | `params` plus required shot-level `media` |
+| `hybrid` | output | output fps | `params` plus required shot-level `media` with layers |
 | `project:<id>` | module declaration (`output`, `project-pixel` or custom) | module declaration | `params` plus JSON-safe `moduleParams` validated by the module |
-| `video` | output | output fps | placeholder; throws |
-| `hybrid` | output | output fps | placeholder; throws |
 
-Declarative projects remain valid without `sceneModules`. A project-local module is executable code and requires the explicit approval contract described in §4.1.
+Declarative projects remain valid without `sceneModules`. A project-local module is executable code and requires the explicit approval contract described in §4.1. Video and Hybrid shot media are described in §4.2.
 
 ### 4.1 Project scene module contract
 
@@ -217,6 +218,75 @@ Errors are fail-closed and named: manifest violations raise `ConfigValidationErr
 
 A hash proves identity, not safety. Only run code you authored or explicitly approved. Importing the verified module executes its top-level code in the browser, so approval covers the whole file, not just `render`. There is no OS sandbox or browser network sandbox; do not load modules from remote sources, npm, GitHub or another project.
 
+### 4.2 Video and Hybrid shot media
+
+`video` and `hybrid` shots require a typed `media` object; canvas renderers must not declare one. `params.assetId` is rejected on media shots; the asset reference belongs in `media`.
+
+Video source object:
+
+```json
+{
+  "kind": "video",
+  "assetId": "VIDEO-01",
+  "sourceStartSeconds": 0.625,
+  "fit": "cover",
+  "endBehavior": "reject",
+  "muted": true,
+  "positionX": 0,
+  "positionY": 0,
+  "scale": 1
+}
+```
+
+| Field | Rule |
+|---|---|
+| `assetId` | existing approved asset of kind `video` |
+| `sourceStartSeconds` | finite, non-negative; must align to an output-frame boundary at the project fps |
+| `fit` | `contain` or `cover`; defaults to `cover` |
+| `endBehavior` | only `reject` is supported; defaults to `reject` |
+| `muted` | must be `true`; embedded video audio is never emitted |
+| `positionX`, `positionY` | finite output-pixel offsets; default 0 |
+| `scale` | greater than 0 and at most 20; default 1 |
+
+Hybrid media:
+
+```json
+{
+  "kind": "hybrid",
+  "video": {"assetId": "VIDEO-01", "sourceStartSeconds": 0.7, "fit": "cover", "endBehavior": "reject", "muted": true},
+  "layers": [
+    {"assetId": "LAYER-01", "order": 10, "opacity": 0.9, "fit": "contain",
+     "positionX": 0, "positionY": 0, "scale": 1,
+     "visibleFromFrame": 0, "visibleToFrame": 20}
+  ],
+  "overlay": {"kind": "rain", "intensity": 0.65, "color": "#B7F7E8"}
+}
+```
+
+Hybrid rules:
+
+- Bottom-to-top order: fallback background, video, PNG layers sorted by `order`, Canvas overlay.
+- `layers` must contain between 1 and 16 entries.
+- Each layer asset must be kind `layer` and an 8-bit RGBA or grayscale-alpha PNG.
+- `order` is an integer `0..31` and unique within the shot.
+- `opacity` is in `[0,1]`; `scale` is in `(0,20]`; positions are finite output-pixel offsets.
+- `visibleFromFrame`/`visibleToFrame` are half-open shot-local ranges; defaults are `0` and the shot length. The end must not exceed the shot length.
+- `overlay.kind` is `rain`, `orbits` or `scan`; `intensity` is in `[0,1]`; color is optional.
+- Unknown keys, wrong asset kinds, missing/duplicate layer orders, empty layers, invalid overlays and invalid ranges fail closed.
+
+Media validation sequence:
+
+1. Manifest and asset approval/kind checks (`ConfigValidationError`).
+2. Project-relative asset path, hash verification and staging.
+3. FFprobe video probe: MP4, H.264, positive dimensions, constant frame rate, duration, audio presence, pixel format and zero rotation. VFR or rotated video is rejected with a preprocessing message.
+4. PNG header probe for layer assets: IHDR, 8-bit channels, alpha-capable color type and safe dimensions.
+5. Timeline validation: `sourceStartSeconds + shotDurationSeconds` must fit inside the probed source duration under `reject`.
+6. Browser-side runtime checks repeat source availability and timing before the media element renders.
+
+Source FPS may differ from output FPS; Remotion's decoder maps shot-local output time to the source. Variable-frame-rate sources are rejected and exact source-frame selection is not claimed for them. Source video audio is muted; the project soundtrack is the only audio output.
+
+The synthetic templates are under `factory/examples/media-projects/`. They are templates, not loadable manifests; `npm run media:seed` generates media and writes hash-approved `project.json` files into an external workspace. Generated media is not committed.
+
 ## 5. Assets and approval
 
 - `approved`: hash-verified, staged to `cache/render-public`, usable.
@@ -231,16 +301,19 @@ A hash proves identity, not safety. Only run code you authored or explicitly app
 - `factory/examples/projects/synthetic-layered-demo/project.json` — 1080x1350, 30fps, 45 frames, layered renderer, approved background image, declarative only.
 - `factory/examples/projects/synthetic-module-pixel-demo/` — 1920x1080, 24fps, 48 frames, 480x270 project-pixel canvas, 12fps module sampling, two external TS modules (`runner`, `signal`).
 - `factory/examples/projects/synthetic-module-layered-demo/` — 900x1600, 30fps, 45 frames, full-resolution external TSX modules (`aurora`, `ribbons`), approved synthetic background image.
+- `factory/examples/media-projects/synthetic-video-demo/` — template for 1920x1080, 24fps, two Video shots, 30fps source, 0.625s and 2.0s source in-points, synthetic soundtrack.
+- `factory/examples/media-projects/synthetic-hybrid-demo/` — template for 1080x1920, 30fps, two Hybrid shots, 24fps source, transparent PNG ring, rain/orbits Canvas overlays, synthetic soundtrack.
 
-Copy them into `MV_WORKSPACE_ROOT` with `factory/scripts/seed-workspace.mjs`. Generated audio and images are synthesized locally and ignored by Git.
+Copy the declarative/module projects into `MV_WORKSPACE_ROOT` with `factory/scripts/seed-workspace.mjs`. Generate the media projects with `npm run media:seed`. Media templates require FFmpeg/FFprobe and are not directly loadable until seeded.
 
 ## 7. Adding a new project without engine changes
 
 1. Create `MV_WORKSPACE_ROOT/<projectId>/` outside the repository.
 2. Add `project.json`, approved audio and assets.
 3. Choose existing renderers and params, or declare trusted modules under `scenes/` with their hashes and `user-authored-approved` trust.
-4. Write frame-domain chapters/shots and optional `moduleParams`.
-5. Validate with the loader/tests, then render via `factory/scripts/render-project.mjs`.
-6. For module projects, run `npm run verify:modules` to bundle and render boundary/hold evidence.
+4. For video/hybrid shots, add typed `media` with approved asset IDs, output-frame-aligned source in-points, fit/scale and explicit layer/overlay configuration.
+5. Write frame-domain chapters/shots and optional `moduleParams`.
+6. Validate with the loader/tests, then render via `factory/scripts/render-project.mjs`.
+7. For module projects, run `npm run verify:modules`; for media projects, run `npm run media:seed` and `npm run media:verify` in a disposable external workspace.
 
-No engine source edit is required for a new duration, fps, dimension, shot count, style profile, declarative renderer configuration or declared Canvas 2D module.
+No engine source edit is required for a new duration, fps, dimension, shot count, style profile, declarative renderer configuration, media shot or declared Canvas 2D module.
