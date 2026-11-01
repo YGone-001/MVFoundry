@@ -364,7 +364,13 @@ runProject('synthetic-generation-continuity-demo', {
     '--job', rejectedPrepared.job.jobId, '--authorization', 'authorized-for-simulation',
     '--max-spend', '0', '--max-submissions', '1', '--notes', 'Offline rehearsal.',
   ]);
-  gen(projectId, 'run-offline', ['--job', rejectedPrepared.job.jobId]);
+  gen(projectId, 'run-offline', [
+    '--job', rejectedPrepared.job.jobId,
+    // REQ-001 already carries an approved attachment; replacing it is an
+    // explicit decision, so the rejection rehearsal records one.
+    '--replace-approved',
+    '--reason', 'Acceptance rehearsal: exercise the reviewer rejection path on a replacement candidate.',
+  ]);
   gen(projectId, 'review', ['--job', rejectedPrepared.job.jobId, '--decision', 'reject', '--notes', 'Rejected for acceptance evidence.']);
   const afterReject = genStatus(projectId, 'status');
   const rejectedIntake = readJson(path.join(project.projectDir, 'preproduction', 'asset-intake.json'))

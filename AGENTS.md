@@ -131,6 +131,52 @@ Do not treat plans, prior reports or user summaries as proof of the current file
 - Remote output retrieval must be HTTPS to expected hosts, with redirect, loopback/link-local, content-type, size and timeout limits. Provider-returned local paths are never followed. An incompatible clip must be rejected or explicitly derived with a recorded FFmpeg command and both hashes; alpha is never invented for an opaque image.
 - CI never receives provider credentials, never submits billable requests, and the fake transport has no network access.
 
+### Provider output typing
+
+- An operation produces exactly one media type: `text-to-image` → image, `image-to-video` and `text-to-video` → video. `transparent-layer` is an image subtype accepted only when the operation produces an image **and** the model manifest declares alpha support. A job whose declared kind is incompatible with its operation is rejected before submission.
+- `bindProviderOutput` binds the result to the exact job and persisted task: a missing task id, a differing task id, an unexpected file kind, a non-HTTPS location or more than one output file all fail closed. The selection policy is `single`; an ambiguous result set is a human decision, not a default.
+- A task document that reports success without a URL, reports URLs while not succeeded, carries an unknown status, or belongs to another task id is rejected. Adapter output kind is derived from the submitted operation, never hardcoded to `video`.
+
+### Reference-image input policy
+
+- A local filesystem path is never a provider-accessible image. `prepareReferenceInput` resolves the approved project asset, rejects links/junctions, verifies the SHA256 against the exact bytes, validates real image content (PNG IHDR / JPEG SOF, never the extension), enforces the documented size/dimension/aspect envelope, confirms the model accepts a reference, and records the identity as `asset:<id>#sha256:<12 hex>`.
+- Local approval, intended reference use, explicit external disclosure and provider job execution are four separate decisions. `--authorize-disclosure` is disclosure consent for one run; `--uploads-private` records upload intent for one job. Neither implies the other.
+- A reference payload exists only inside `buildReferenceDataUri`, only for `authorized-for-simulation`, and is never written to disk, logged, reported or printed. `authorized-live` is refused in this phase.
+- `PRIVATE_REFERENCE_UPLOAD = NOT_GRANTED`. The upload-endpoint adapter is a typed boundary that authorises nothing and contacts nothing.
+- Reference preparation supports PNG and JPEG. WebP and GIF are rejected even where a provider documents support.
+
+### Remote media retrieval security
+
+- Only `retrieveRemoteOutput` moves provider bytes into a project. It enforces HTTPS, no embedded credentials, default port only, no IP literals, a 2048-character limit, and a per-provider closed delivery-host allowlist. Output is not required to come from the API hostname, because signed results are served from a content-delivery domain.
+- Every resolved address is screened before the request; loopback, private, carrier-grade NAT, link-local, multicast, reserved, documentation, 6to4, NAT64, unique-local and IPv4-mapped-private ranges are refused. The default resolver refuses to run; a live retrieval must inject one.
+- Redirects are followed manually, bounded by policy, and every target is revalidated. A redirect without `Location` or to an off-policy host is refused.
+- Downloads are streamed into `<project>/cache/retrieval/<jobId>/`, with a deadline, a running byte cap that works without `Content-Length`, a declared-length check, a truncation check, content-type agreement with the job kind, and magic-byte validation. Finalization is an atomic rename inside the project; failures remove the partial file.
+- Signed result URLs are never persisted. Records keep host, path and a query-parameter count with `signedQueryRedacted: true`; simulation transcripts keep only origin and pathname.
+- An expired result URL (`403`/`404`/`410`) is recoverable only by re-querying the existing provider task. Retrieval failure is never a reason to resubmit a billable generation, and is recorded with `failureKind: retrieval` so it cannot be confused with `generation`.
+
+### Normalization and provenance
+
+- Accepted renderers require MP4/H.264 CFR, supported dimensions, zero effective rotation and muted source audio. `inspectVideoDeep` reports container, codec, pixel format, dimensions, time base, nominal/average frame rate, sampled timestamps, rotation, duration, decode validity and audio stream count from FFprobe plus a real decode pass.
+- `normalizeVideo` uses one reviewed profile (`video-normalize-v1`) and a structured argument vector. Project configuration cannot supply FFmpeg arguments, filtergraphs or shell strings. Only fps, width, height and duration vary.
+- Rotation correction uses FFmpeg's documented display-matrix application (`-autorotate`), which clears the matrix on the encoded output. A hand-written `transpose` was rejected because FFmpeg 9 propagates the display matrix to the output and the renderer would still reject the file.
+- The derived file is re-inspected and must satisfy container, codec, pixel format, exact dimensions, target frame rate, zero rotation, clean decode and zero audio streams. A derived duration shorter than the shot is refused.
+- The provider original is never overwritten. The normalization record keeps both paths, both hashes, both inspections, the profile, the exact arguments with local paths replaced, the timing change and the frame duplication/drop policy. Derived media is never approved automatically.
+- Corrupt input, undecodable codecs, dimensions outside 16–3840 × 16–2160, duration above 120 s, unusable frame rates, fewer than two frame timestamps, rotations that are not multiples of 90°, non-even target dimensions and ambiguous timing are rejected rather than approximated.
+
+### Duplicate submission protection, retry and recovery boundaries
+
+- The provider task id is persisted immediately after a successful submission response and before any status polling. A later resume polls that task instead of submitting, and consumes no new submission budget.
+- A returned task id that conflicts with the persisted one is a hard failure. Attempt history is append-only; a later success never erases an earlier timeout.
+- A submission timeout parks the job as `unknown-submission-state` with no task id and `failureKind: submission`. Any retry is refused until the remote task is reconciled. A provider task id is never invented.
+- Retrieval refuses to run without a persisted task id, and refuses to run when the provider reported generation failure or cancellation. Repeated retrieval is idempotent and leaves no partial files.
+- `stage` refuses to replace an approved attachment unless `--replace-approved --reason "<why>"` is passed; a replacement always lands as `review: pending`.
+
+### Provider acceptance and CI isolation
+
+- `npm run provider:seed` creates `synthetic-provider-image-demo`, `synthetic-provider-video-demo`, `synthetic-provider-hybrid-demo` and `synthetic-provider-guard-demo` in a fresh external workspace. `npm run provider:verify` is mandatory in Windows CI and runs entirely through injected fake transports.
+- Acceptance means: simulated remote result → real local bytes → validated/normalized file → approved asset → real rendered video, with decoded frames and soundtrack inspected. A TypeScript build or a simulated API response alone is not acceptance.
+- The verifier must never be conditionally skipped, never upload artifacts, and never receive credentials.
+
 ### Timeline and rendering
 
 - Integer output frames are the canonical editing clock; scene ranges are half-open `[startFrame, endFrame)`.
@@ -175,6 +221,10 @@ npm run preproduction -- approve-beats --project synthetic-beat-demo --interpret
 npm run preproduction -- plan --project synthetic-beat-demo
 npm run handoff:seed
 npm run handoff:verify
+npm run generation:seed
+npm run generation:verify
+npm run provider:seed
+npm run provider:verify
 npm run preproduction -- continuity --project synthetic-mixed-timeline-demo
 npm run preproduction -- tasks --project synthetic-mixed-timeline-demo
 npm run preproduction -- attach-asset --project synthetic-mixed-timeline-demo --requirement REQ-001 --asset-id VID-HARBOUR --path intake/video/harbour-30fps.mp4 --provenance "<source>" --rights "<licence>"

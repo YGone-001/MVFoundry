@@ -97,6 +97,10 @@ jobs:
         run: npm run generation:seed
       - name: Verify generation jobs, offline provider and simulated adapter
         run: npm run generation:verify
+      - name: Seed provider output workspace
+        run: npm run provider:seed
+      - name: Verify provider retrieval, normalization and real renders
+        run: npm run provider:verify
       - name: Publication audit
         run: npm run audit:publication
       - name: Git media audit

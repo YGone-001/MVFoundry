@@ -129,6 +129,14 @@ Preproduction files (`annotations.json`, `creative-brief.json`, optional lyrics,
 - Staging recreates only `<project>/cache/render-public` through the same validator.
 - Original approved media and audio remain untouched and are hash-checked before and after staging.
 
+## Provider retrieval scratch space
+
+- Remote provider output is streamed into `<project>/cache/retrieval/<jobId>/` as a `.part` file.
+- The destination is validated by `assertSafePath` before a single byte is written, so traversal, another project, the engine repository and linked destinations are refused before any network read is committed to disk.
+- A failed download removes its partial file; `resume-retrieval` clears only that job's scratch directory through the same validator.
+- Successful retrieval finalizes by renaming the file into `<project>/generation/outputs/<jobId>/`, and the retrieved bytes are hashed before and after finalization.
+- Nothing is written outside the authorized project, and no provider URL is ever used as a local path.
+
 ## Tests
 
 The engine tests cover:

@@ -292,6 +292,16 @@ export type StageOutputInput = {
   requirement: AssetRequirement;
   requirements: AssetRequirement[];
   rights: string;
+  /** Set when `sourceFile` is a derived copy and the provider bytes are retained. */
+  derived?: {
+    originalPath: string;
+    originalSha256: string;
+    normalizationVersion: string;
+    arguments: string[];
+  } | null;
+  /** Replacing an approved attachment is a separate, explicit decision. */
+  replaceApproved?: {authorized: boolean; reason: string} | null;
+  retrieval?: Record<string, unknown> | null;
 };
 
 export type StagedOutput = {
@@ -308,8 +318,30 @@ export type StagedOutput = {
 export const stageGenerationOutput = (input: StageOutputInput): StagedOutput => {
   const {project, boundary, job, requirement} = input;
   const expected = outputKindForRequirement(requirement);
+  if (job.output.kind !== expected) {
+    throw new PreproductionError(
+      `Job ${job.jobId} declares ${job.output.kind} output but requirement ${requirement.id} needs ${expected}`,
+    );
+  }
   if (!existsSync(input.sourceFile)) {
     throw new PreproductionError(`Provider output is missing: ${path.basename(input.sourceFile)}`);
+  }
+  const existingIntake = readOptionalProjectJson<AssetIntakeDocument>(
+    project.projectDir,
+    PREPRODUCTION_PATHS.assetIntake,
+  );
+  const previous = (existingIntake?.records ?? []).find(
+    (entry) => entry.requirementId === requirement.id,
+  );
+  if (previous && previous.review === 'approved') {
+    if (!input.replaceApproved?.authorized) {
+      throw new PreproductionError(
+        `Requirement ${requirement.id} already has approved asset ${previous.assetId}; replacing an approved attachment needs an explicit replacement decision`,
+      );
+    }
+    if (!input.replaceApproved.reason || input.replaceApproved.reason.trim() === '') {
+      throw new PreproductionError('An approved replacement requires a recorded reason');
+    }
   }
   const stagingDir = ensureSafeDirectory(
     boundary,
@@ -380,7 +412,14 @@ export const stageGenerationOutput = (input: StageOutputInput): StagedOutput => 
     sha256,
     fileSizeBytes: bytes,
     fingerprint: requirement.fingerprint,
-    provenance: `${job.provider}/${job.model}/${job.operation} job ${job.jobId} (${job.result.files[0]?.marker ?? 'provider-output'})`,
+    provenance: [
+      `${job.provider}/${job.model}/${job.operation} job ${job.jobId}`,
+      `task ${job.execution.providerTaskId ?? 'none'}`,
+      `(${job.result.files[0]?.marker ?? 'provider-output'})`,
+      input.derived
+        ? `derived via ${input.derived.normalizationVersion} from ${input.derived.originalPath} sha256 ${input.derived.originalSha256}`
+        : 'original provider bytes retained',
+    ].join(' | '),
     rights: input.rights,
     review: 'pending',
     reviewNotes: null,
@@ -401,11 +440,9 @@ export const stageGenerationOutput = (input: StageOutputInput): StagedOutput => 
       `Requirement ${requirement.id} fingerprint is inconsistent; re-plan before handing off generated output`,
     );
   }
-  const existing = readOptionalProjectJson<AssetIntakeDocument>(
-    project.projectDir,
-    PREPRODUCTION_PATHS.assetIntake,
+  const records = (existingIntake?.records ?? []).filter(
+    (entry) => entry.requirementId !== requirement.id,
   );
-  const records = (existing?.records ?? []).filter((entry) => entry.requirementId !== requirement.id);
   records.push(record);
   const knownRequirements = new Map(
     [...input.requirements, requirement].map((entry) => [entry.id, entry]),
@@ -433,6 +470,10 @@ export const stageGenerationOutput = (input: StageOutputInput): StagedOutput => 
     staged: {path: relative, sha256, bytes},
     technical,
     marker: job.result.files[0]?.marker ?? 'provider-output',
+    derived: input.derived ?? null,
+    retrieval: input.retrieval ?? null,
+    replacedApprovedAsset: previous?.review === 'approved' ? previous.assetId : null,
+    replacementReason: previous?.review === 'approved' ? input.replaceApproved?.reason ?? null : null,
     notes: ['Technical validation only; the asset stays pending until a reviewer approves it.'],
   });
   return {record, manifestPath, stagedPath, technical};

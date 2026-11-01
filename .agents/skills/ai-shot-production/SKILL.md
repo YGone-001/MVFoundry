@@ -99,3 +99,14 @@ Defines how generated media may enter a local project. P0 authorizes no provider
 - Never treat a timeout as a retryable failure: an uncertain submission is parked as `unknown-submission-state` until the provider task id is reconciled.
 - Never send credentials, private reference images, lyrics or audio to a provider without a separate per-asset and per-job authorization.
 - Prompt wording cannot guarantee visual identity consistency; generated output still needs a separate visual review.
+
+## Provider media lifecycle (P1-E-D)
+
+- Output kind is bound to the submitted operation: `text-to-image` yields an image, `image-to-video` yields a video, and a transparent layer is only accepted where the operation produces an image and the model manifest declares alpha. Never treat a video URL as an image result or the reverse.
+- A provider result is bound to the exact job and persisted task id. A missing task id, a different task id, an unexpected kind or more than one output file is a failure, not a choice to make.
+- A local filesystem path is not a provider-accessible image. Prepare a reference through `prepare-references`, which verifies containment, links, hash, real PNG/JPEG content, size/dimension/aspect limits and model capability, and only produces a payload after explicit disclosure authorization.
+- Local asset approval, intended reference use, external disclosure and job execution are four separate decisions. `--uploads-private` records upload intent for a job; `--authorize-disclosure` is disclosure consent for one run. Neither implies the other.
+- Provider bytes are retrieved only through the secure retrieval path: HTTPS, trusted delivery host, screened addresses, bounded redirects, deadline, streaming byte cap, content-type and magic-byte checks, atomic project-local finalization and redacted signed URLs.
+- An expired result URL is recovered by re-querying the existing task. Retrieval failure never justifies a second billable submission.
+- Incompatible media is normalized under the reviewed profile, never by an ad-hoc command. The provider original is kept, both hashes are recorded, and the derived file still needs review.
+- Normalization cannot invent transparency. An opaque image never satisfies a layer requirement.

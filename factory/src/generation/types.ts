@@ -3,6 +3,9 @@ import type {AssetRequirementKind} from '../preproduction/types';
 export const GENERATION_SCHEMA_VERSION = 1;
 export const GENERATION_PROMPT_VERSION = 'prompt-v1';
 export const RUNWAY_API_VERSION = '2024-11-06';
+export const PROVIDER_OUTPUT_SCHEMA_VERSION = 1;
+export const RETRIEVAL_POLICY_VERSION = 'provider-retrieval-v1';
+export const NORMALIZATION_VERSION = 'video-normalize-v1';
 
 export type GenerationProviderId = 'offline-fixture' | 'runway';
 export type GenerationOperation = 'text-to-image' | 'image-to-video' | 'text-to-video';
@@ -31,6 +34,22 @@ export type GenerationExecutionState =
   | 'output-retrieved';
 
 export type GenerationReviewState = 'awaiting-review' | 'approved' | 'rejected';
+
+/**
+ * Failure provenance is split so a failed download can never be reported as a
+ * failed generation: a retrieval problem must not invite a second billable
+ * submission.
+ */
+export type GenerationFailureKind = 'submission' | 'generation' | 'retrieval' | 'normalization';
+
+export type GenerationAttemptRecord = {
+  attempt: number;
+  at: string;
+  phase: 'submit' | 'status' | 'retrieve' | 'normalize';
+  outcome: 'submitted' | 'unknown' | 'succeeded' | 'failed' | 'canceled' | 'recovered';
+  providerTaskId: string | null;
+  message: string | null;
+};
 
 export type GenerationPromptSection = {
   depict: string;
@@ -81,6 +100,8 @@ export type GenerationJobExecution = {
   providerTaskId: string | null;
   attempts: number;
   failure: string | null;
+  failureKind?: GenerationFailureKind | null;
+  attemptHistory?: GenerationAttemptRecord[];
   lastTransition: string;
 };
 
@@ -90,6 +111,10 @@ export type GenerationJobResultFile = {
   sha256: string;
   bytes: number;
   marker: 'synthetic-offline-test-output' | 'provider-output';
+  /** Project-relative path of the untouched provider bytes when `path` is derived. */
+  originalPath?: string | null;
+  originalSha256?: string | null;
+  normalizationVersion?: string | null;
 };
 
 export type GenerationJob = {
@@ -112,6 +137,8 @@ export type GenerationJob = {
   execution: GenerationJobExecution;
   result: {
     files: GenerationJobResultFile[];
+    /** Derived compatibility copy; `files` always keeps the provider original. */
+    derived?: GenerationJobResultFile | null;
     manifestPath: string | null;
     inspectedAt: string | null;
   };
@@ -208,6 +235,8 @@ export type ProviderStatusResult = {
   progress: number | null;
   failure: string | null;
   outputUrl: string | null;
+  /** Every result URL the provider returned, in provider order. */
+  outputUrls: string[];
 };
 
 export type ProviderOutputFile = {
@@ -215,11 +244,34 @@ export type ProviderOutputFile = {
   source: 'local' | 'https';
   location: string;
   bytes: number | null;
+  contentType?: string | null;
 };
 
 export type ProviderOutput = {
   files: ProviderOutputFile[];
   providerTaskId: string | null;
+  notes: string[];
+  /** Kind the provider operation is documented to produce. */
+  declaredKind?: GenerationOutputKind | null;
+};
+
+/**
+ * The adapter cannot know an operation from a task id alone after a restart, so
+ * every retrieval states what the bound job expects. A mismatch fails closed.
+ */
+export type ProviderRetrieveExpectation = {
+  jobId: string;
+  operation: GenerationOperation;
+  outputKind: GenerationOutputKind;
+};
+
+export type BoundProviderOutput = {
+  schemaVersion: typeof PROVIDER_OUTPUT_SCHEMA_VERSION;
+  jobId: string;
+  providerTaskId: string;
+  kind: GenerationOutputKind;
+  selectionPolicy: 'single';
+  file: ProviderOutputFile;
   notes: string[];
 };
 
@@ -244,8 +296,172 @@ export type GenerationProvider = {
   validate: (request: ProviderRequest) => CapabilityViolation[];
   submit: (request: ProviderRequest) => Promise<ProviderSubmitResult>;
   status: (taskId: string) => Promise<ProviderStatusResult>;
-  retrieve: (taskId: string) => Promise<ProviderOutput>;
+  retrieve: (taskId: string, expectation: ProviderRetrieveExpectation) => Promise<ProviderOutput>;
   cancel: ((taskId: string) => Promise<boolean>) | null;
+};
+
+// ---------------------------------------------------------------------------
+// Reference input preparation
+// ---------------------------------------------------------------------------
+
+/**
+ * Local approval, intended use, external disclosure and provider execution are
+ * four different decisions. Only the last two may move bytes off the machine.
+ */
+export type ReferenceDisclosureState =
+  | 'not-authorized'
+  | 'authorized-for-simulation'
+  | 'authorized-live';
+
+export type ReferenceTransportKind = 'data-uri' | 'upload-endpoint';
+
+export type PreparedReference = {
+  schemaVersion: 1;
+  assetId: string;
+  /** Redacted identity: asset id plus a hash prefix, never a filesystem path. */
+  identity: string;
+  sha256: string;
+  bytes: number;
+  mimeType: 'image/png' | 'image/jpeg';
+  width: number;
+  height: number;
+  aspectRatio: number;
+  transport: ReferenceTransportKind;
+  disclosure: ReferenceDisclosureState;
+  /** Base64 payload length that a data URI would occupy; never the payload itself. */
+  encodedCharacters: number;
+  blockers: string[];
+};
+
+// ---------------------------------------------------------------------------
+// Remote output retrieval
+// ---------------------------------------------------------------------------
+
+export type DownloadRequest = {
+  url: string;
+  headers: Record<string, string>;
+  signal: AbortSignal | null;
+};
+
+export type DownloadResponse = {
+  status: number;
+  headers: Record<string, string>;
+  body: AsyncIterable<Uint8Array>;
+  /** Bytes the transport claims to have produced, when it knows. */
+  declaredBytes?: number | null;
+};
+
+export type DownloadTransport = (request: DownloadRequest) => Promise<DownloadResponse>;
+
+export type HostResolver = (hostname: string) => Promise<string[]>;
+
+export type OutputHostPolicy = {
+  provider: GenerationProviderId;
+  /** Exact hostnames. A leading dot marks a suffix rule, e.g. `.cdn.example`. */
+  hosts: string[];
+  maxRedirects: number;
+  maxBytes: number;
+  timeoutMs: number;
+  contentTypes: string[];
+};
+
+export type RedactedSourceIdentity = {
+  host: string;
+  path: string;
+  queryParameters: number;
+  signedQueryRedacted: true;
+};
+
+export type RetrievalRecord = {
+  schemaVersion: 1;
+  policyVersion: typeof RETRIEVAL_POLICY_VERSION;
+  jobId: string;
+  providerTaskId: string | null;
+  kind: GenerationOutputKind;
+  source: RedactedSourceIdentity;
+  redirects: number;
+  contentType: string;
+  bytes: number;
+  sha256: string;
+  storedPath: string;
+  elapsedMs: number;
+};
+
+// ---------------------------------------------------------------------------
+// Media normalization
+// ---------------------------------------------------------------------------
+
+export type VideoFrameTiming = {
+  sampleCount: number;
+  medianDeltaSeconds: number;
+  maxDeviationSeconds: number;
+  variableFrameRate: boolean;
+};
+
+export type VideoInspection = {
+  container: string;
+  codec: string;
+  pixelFormat: string;
+  width: number;
+  height: number;
+  timeBase: string;
+  nominalFrameRate: number;
+  averageFrameRate: number;
+  frameCount: number | null;
+  durationSeconds: number;
+  rotation: number;
+  decodesCleanly: boolean;
+  decodeErrors: string[];
+  audioStreamCount: number;
+  timing: VideoFrameTiming;
+};
+
+export type NormalizationRecord = {
+  schemaVersion: 1;
+  normalizationVersion: typeof NORMALIZATION_VERSION;
+  jobId: string;
+  providerTaskId: string | null;
+  original: {
+    path: string;
+    sha256: string;
+    bytes: number;
+    inspection: VideoInspection;
+  };
+  derived: {
+    path: string;
+    sha256: string;
+    bytes: number;
+    inspection: VideoInspection;
+  };
+  profile: {
+    container: 'mp4';
+    videoCodec: 'libx264';
+    pixelFormat: 'yuv420p';
+    preset: string;
+    crf: number;
+    gopFrames: number;
+    colorSpace: 'bt709';
+    audioPolicy: 'strip';
+    scaling: 'fit-pad';
+    targetWidth: number;
+    targetHeight: number;
+    targetFps: number;
+    targetDurationSeconds: number;
+  };
+  /** Exact FFmpeg argument vector with local paths replaced by placeholders. */
+  arguments: string[];
+  timing: {
+    sourceFrameRate: number;
+    targetFrameRate: number;
+    sourceDurationSeconds: number;
+    derivedDurationSeconds: number;
+    frameDuplicationPolicy: string;
+    frameDropPolicy: string;
+  };
+  rotationCorrection: number;
+  rights: string;
+  review: 'pending';
+  createdAt: string;
 };
 
 export type GenerationJobSeed = {

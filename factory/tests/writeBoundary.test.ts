@@ -1,6 +1,7 @@
 import {spawnSync} from 'node:child_process';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -144,6 +145,9 @@ test('G02: symlinked output destination is rejected', (t) => {
   const link = path.join(boundary.rendersRoot, 'linked.mp4');
   try {
     symlinkSync(sentinel, link, 'file');
+    // Some Windows configurations accept the call and create nothing, which
+    // would make this test assert against a destination that never existed.
+    if (!lstatSync(link).isSymbolicLink()) throw new Error('symlink was not created');
   } catch {
     rmSync(outside, {recursive: true, force: true});
     t.skip('file symlink creation is unavailable on this host');

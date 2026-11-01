@@ -4,7 +4,8 @@
 // Usage: npm run generation -- <command> --project <id> [--workspace <root>]
 // Requires npm run build and MV_WORKSPACE_ROOT or --workspace.
 
-import {existsSync, readFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+import {existsSync, readFileSync, statSync} from 'node:fs';
 import path from 'node:path';
 import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
@@ -29,17 +30,30 @@ if (!command || command === '--help' || command === 'help') {
   inspect --project <id> --job <JOB>
   approve-request --project <id> --job <JOB> --authorization <authorized-for-simulation|denied> \
     --max-spend <usd> [--max-submissions N] [--uploads-private] --notes "<review>"
-  run-offline --project <id> --job <JOB> [--rights "<rights assertion>"]
+  run-offline --project <id> --job <JOB> [--rights "<rights assertion>"] [--replace-approved --reason "<why>"]
   submit-live --project <id> --job <JOB>
   resume --project <id> --job <JOB> [--fixtures <fixture.json>]
-  handoff --project <id> --job <JOB> --file <project-relative-output> [--rights "<rights>"]
+  inspect-output --project <id> --job <JOB>
+  prepare-references --project <id> --job <JOB> [--authorize-disclosure]
+  validate-response --project <id> --job <JOB> --response <project-relative.json>
+  retrieve --project <id> --job <JOB> --fixture <fixture.json> [--out <project-relative>] [--max-bytes N] [--rights "<rights>"]
+  resume-retrieval --project <id> --job <JOB> --fixture <fixture.json> [--out <project-relative>] [--rights "<rights>"]
+  inspect-media --project <id> --file <project-relative>
+  normalize --project <id> --job <JOB> [--file <project-relative>] [--fps N] [--width W] [--height H] [--rights "<rights>"]
+  compare-media --project <id> --original <project-relative> --derived <project-relative>
+  stage --project <id> --job <JOB> [--file <project-relative>] --rights "<rights>" [--replace-approved --reason "<why>"]
+  handoff --project <id> --job <JOB> [--file <project-relative-output>] --rights "<rights>"
   review --project <id> --job <JOB> --decision <approve|reject> --notes "<review>"
+  blockers --project <id> --job <JOB>
   report --project <id>
 
 All commands accept --workspace <external-root> or MV_WORKSPACE_ROOT.
 LIVE_PROVIDER_EXECUTION = NOT_GRANTED in this phase: submit-live always fails closed.
+PRIVATE_REFERENCE_UPLOAD = NOT_GRANTED: reference preparation never transfers bytes.
 Only offline-fixture output produces real media locally; it is marked
-synthetic-offline-test-output and is never described as AI generation.`);
+synthetic-offline-test-output and is never described as AI generation.
+Retrieval and normalization commands replay recorded fixtures through injected
+transports and never contact a provider.`);
   process.exit(command ? 0 : 2);
 }
 if (!projectId) {
@@ -54,6 +68,7 @@ if (!workspaceRoot) {
 const {loadProject} = require('../dist/src/project/loadProject.js');
 const {DEFAULT_SCENE_REGISTRY} = require('../dist/src/scenes/registry.js');
 const {createProjectWriteBoundary} = require('../dist/src/workspace/writeBoundary.js');
+const {assertSafePath, ensureSafeDirectory} = require('../dist/src/workspace/writeBoundary.js');
 const {resolveProjectRelativePath} = require('../dist/src/workspace/guard.js');
 const {
   PREPRODUCTION_PATHS,
@@ -91,7 +106,42 @@ const {
   createRunwayProvider,
   createDenyingTransport,
 } = require('../dist/src/generation/providers.js');
-const {GENERATION_SCHEMA_VERSION, RUNWAY_API_VERSION} = require('../dist/src/generation/types.js');
+const {
+  bindProviderOutput,
+  expectedOutputKindForOperation,
+  parseTaskDocument,
+} = require('../dist/src/generation/outputContract.js');
+const {
+  OUTPUT_HOST_POLICIES,
+  retrieveRemoteOutput,
+  validateOutputUrl,
+  clearRetrievalScratch,
+} = require('../dist/src/generation/retrieval.js');
+const {
+  createScriptedDownloadTransport,
+  createScriptedResolver,
+} = require('../dist/src/generation/simulation.js');
+const {
+  prepareReferenceInput,
+  buildReferenceDataUri,
+  createDeniedUploadAdapter,
+  inspectReferenceImage,
+} = require('../dist/src/generation/references.js');
+const {
+  attemptHistoryOf,
+  assertTaskIdConsistency,
+  recordAttempt,
+  retrievalBlocker,
+  submissionBlocker,
+} = require('../dist/src/generation/recovery.js');
+const {
+  inspectVideoDeep,
+  normalizeVideo,
+  frameTimingPolicy,
+  NORMALIZATION_PROFILE,
+} = require('../dist/src/media/videoNormalize.js');
+const {sha256File} = require('../dist/src/media/hash.js');
+const {GENERATION_SCHEMA_VERSION, RUNWAY_API_VERSION, NORMALIZATION_VERSION} = require('../dist/src/generation/types.js');
 
 const requireRunwayBaseUrl = () => {
   const value = process.env.RUNWAY_BASE_URL;
@@ -99,6 +149,15 @@ const requireRunwayBaseUrl = () => {
     throw new Error('RUNWAY_BASE_URL must be provided; the adapter carries no hardcoded provider host');
   }
   return value;
+};
+
+const redactUrl = (value) => {
+  try {
+    const parsed = new URL(value);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return '<invalid-url>';
+  }
 };
 
 const fail = (message) => {
@@ -455,7 +514,11 @@ const run = () => {
     if (violations.length > 0) fail(`Provider rejected the request: ${violations.map((entry) => entry.message).join('; ')}`);
     const submitted = provider.submit(request);
     return submitted.then(async (result) => {
-      const output = await provider.retrieve(result.taskId);
+      const output = await provider.retrieve(result.taskId, {
+        jobId,
+        operation: job.operation,
+        outputKind: job.output.kind,
+      });
       const local = output.files.filter((file) => file.source === 'local');
       if (local.length !== 1) fail('Offline provider must return exactly one local output file');
       const staged = stageGenerationOutput({
@@ -467,6 +530,9 @@ const run = () => {
         requirement,
         requirements: ctx.storyboard.assetRequirements,
         rights,
+        replaceApproved: hasFlag('replace-approved')
+          ? {authorized: true, reason: arg('reason', '')}
+          : null,
       });
       const updated = {
         ...job,
@@ -540,6 +606,7 @@ const run = () => {
       fail('Requirement changed since the job was prepared; the recorded job is stale');
     }
     const record = readPermissionDocument(ctx.project).find((entry) => entry.jobId === jobId) ?? null;
+    const alreadyBound = job.execution.providerTaskId !== null;
     const decision = checkGenerationPermission({
       job,
       record,
@@ -548,7 +615,8 @@ const run = () => {
       credentialsPresent: true,
       requirementStale: false,
       uploadsPrivateAssets: job.inputAssets.length > 0,
-      attemptsUsed: job.execution.attempts,
+      // Resuming a task that already exists consumes no new submission budget.
+      attemptsUsed: alreadyBound ? 0 : job.execution.attempts,
       live: false,
     });
     if (!decision.allowed) fail(`Simulated lifecycle blocked: ${decision.blockers.join('; ')}`);
@@ -563,7 +631,7 @@ const run = () => {
     const violations = provider.validate(request);
     if (violations.length > 0) fail(`Runway capability validation failed: ${violations.map((entry) => entry.message).join('; ')}`);
     const markUnknown = (message) => {
-      const unknown = {
+      const unknown = recordAttempt({
         ...job,
         execution: {
           ...job.execution,
@@ -571,22 +639,49 @@ const run = () => {
           providerTaskId: null,
           attempts: job.execution.attempts + 1,
           failure: message,
+          failureKind: 'submission',
           lastTransition: new Date().toISOString(),
         },
-      };
+      }, {phase: 'submit', outcome: 'unknown', providerTaskId: null, message});
       const all = jobsOrEmpty(ctx.project).filter((entry) => entry.jobId !== jobId);
       all.push(unknown);
       persistJobs(ctx.boundary, all);
     };
-    submitPath = '/v1/image_to_video';
-    const submitted = provider.submit(request).catch((error) => {
-      if (error && error.unknownSubmission) {
-        markUnknown(error.message);
-        fail(`Submission state is unknown (${error.message}); the job is parked as unknown-submission-state and must be reconciled before any retry`);
-      }
-      fail(error instanceof Error ? error.message : String(error));
-    });
+    const persistExecution = (next) => {
+      const all = jobsOrEmpty(ctx.project).filter((entry) => entry.jobId !== jobId);
+      all.push(next);
+      persistJobs(ctx.boundary, all);
+    };
+    submitPath = job.operation === 'text-to-image' ? '/v1/text_to_image' : '/v1/image_to_video';
+    const submitBlocker = alreadyBound ? null : submissionBlocker(job);
+    if (submitBlocker) fail(`Submission blocked: ${submitBlocker}`);
+    const submitted = alreadyBound
+      ? Promise.resolve({taskId: job.execution.providerTaskId, state: 'submitted'})
+      : provider.submit(request).catch((error) => {
+          if (error && error.unknownSubmission) {
+            markUnknown(error.message);
+            fail(`Submission state is unknown (${error.message}); the job is parked as unknown-submission-state and must be reconciled before any retry`);
+          }
+          fail(error instanceof Error ? error.message : String(error));
+        });
     return submitted.then(async (submission) => {
+      assertTaskIdConsistency(job, submission.taskId);
+      if (!alreadyBound) {
+        // The task id is durable before anything else happens: a crash after this
+        // point resumes status and retrieval instead of resubmitting.
+        persistExecution(recordAttempt({
+          ...job,
+          execution: {
+            ...job.execution,
+            state: 'submitted',
+            providerTaskId: submission.taskId,
+            attempts: job.execution.attempts + 1,
+            failure: null,
+            failureKind: null,
+            lastTransition: new Date().toISOString(),
+          },
+        }, {phase: 'submit', outcome: 'submitted', providerTaskId: submission.taskId, message: null}));
+      }
       let status = await provider.status(submission.taskId);
       let guard = 0;
       while (status.state === 'queued' || status.state === 'running') {
@@ -601,32 +696,40 @@ const run = () => {
         submitPath,
         lastRequestPath: lastRequest ? new URL(lastRequest.url).pathname : null,
         taskId: submission.taskId,
+        resumedExistingTask: alreadyBound,
         states: ['submitted', 'running', status.state],
-        outputUrl: status.outputUrl,
+        outputUrl: status.outputUrl ? redactUrl(status.outputUrl) : null,
+        outputUrlCount: status.outputUrls.length,
         notes: [
           'Replayed through an injected fake transport; no live endpoint was contacted.',
           `Contract pinned at X-Runway-Version ${RUNWAY_API_VERSION}.`,
+          'Signed query parameters are never recorded.',
         ],
       };
+      const current = jobsOrEmpty(ctx.project).find((entry) => entry.jobId === jobId) ?? job;
       const updated = {
-        ...job,
+        ...current,
         execution: {
-          ...job.execution,
-          state: status.state === 'succeeded' ? 'succeeded' : status.state === 'failed' ? 'failed' : job.execution.state,
+          ...current.execution,
+          state: status.state === 'succeeded' ? 'succeeded' : status.state === 'failed' ? 'failed' : current.execution.state,
           providerTaskId: submission.taskId,
-          attempts: job.execution.attempts + 1,
           failure: status.failure,
+          failureKind: status.state === 'failed' ? 'generation' : null,
           lastTransition: new Date().toISOString(),
         },
         result: {
-          ...job.result,
+          ...current.result,
           files: [],
+          derived: null,
           inspectedAt: new Date().toISOString(),
         },
       };
-      const all = jobsOrEmpty(ctx.project).filter((entry) => entry.jobId !== jobId);
-      all.push(updated);
-      persistJobs(ctx.boundary, all);
+      persistExecution(recordAttempt(updated, {
+        phase: 'status',
+        outcome: status.state === 'succeeded' ? 'succeeded' : status.state === 'failed' ? 'failed' : status.state === 'canceled' ? 'canceled' : 'succeeded',
+        providerTaskId: submission.taskId,
+        message: status.failure,
+      }));
       writeProjectJson(
         ctx.boundary,
         `${GENERATION_PATHS.reports}/${jobId}-simulation.json`,
@@ -637,14 +740,459 @@ const run = () => {
     });
   }
 
-  if (command === 'handoff') {
+  if (command === 'inspect-output') {
     const jobId = arg('job');
     if (!jobId) fail('--job is required');
-    const fileArg = arg('file');
-    if (!fileArg) fail('--file is required: a project-relative provider output');
     const ctx = loadContext();
     const job = jobsOrEmpty(ctx.project).find((entry) => entry.jobId === jobId);
     if (!job) fail(`Unknown job ${jobId}`);
+    const expected = expectedOutputKindForOperation(job.operation);
+    console.log(JSON.stringify({
+      projectId,
+      jobId,
+      provider: job.provider,
+      model: job.model,
+      operation: job.operation,
+      declaredOutputKind: job.output.kind,
+      operationOutputKind: expected,
+      contractConsistent: job.output.kind === expected,
+      execution: job.execution.state,
+      providerTaskId: job.execution.providerTaskId,
+      attempts: job.execution.attempts,
+      attemptHistory: attemptHistoryOf(job),
+      failureKind: job.execution.failureKind ?? null,
+      failure: job.execution.failure,
+      retrievalBlocker: retrievalBlocker(job),
+      submissionBlocker: submissionBlocker(job),
+      resultFiles: job.result.files,
+      derived: job.result.derived ?? null,
+      review: job.review.state,
+      note: 'Output kind is bound to the job operation; a mismatch is a contract violation, not a variant.',
+    }, null, 2));
+    return job.output.kind === expected ? 0 : 2;
+  }
+
+  if (command === 'prepare-references') {
+    const jobId = arg('job');
+    if (!jobId) fail('--job is required');
+    const ctx = loadContext();
+    const job = jobsOrEmpty(ctx.project).find((entry) => entry.jobId === jobId);
+    if (!job) fail(`Unknown job ${jobId}`);
+    if (job.inputAssets.length === 0) {
+      console.log(JSON.stringify({projectId, jobId, references: [], note: 'This job declares no reference inputs.'}, null, 2));
+      return 0;
+    }
+    const disclosure = hasFlag('authorize-disclosure') ? 'authorized-for-simulation' : 'not-authorized';
+    const provider = job.provider === 'runway'
+      ? createRunwayProvider({
+          transport: createDenyingTransport(),
+          apiKey: process.env.RUNWAY_API_KEY ?? null,
+          baseUrl: requireRunwayBaseUrl(),
+        })
+      : createOfflineProvider({outputRoot: path.join(ctx.project.projectDir, GENERATION_PATHS.outputs), jobId});
+    const model = provider.capabilities.models.find((entry) => entry.id === job.model);
+    const prepared = job.inputAssets.map((asset) => prepareReferenceInput({
+      project: ctx.project,
+      assetId: asset.assetId,
+      expectedSha256: asset.sha256,
+      provider: job.provider,
+      model: job.model,
+      maxReferences: model ? model.maxReferences : 0,
+      disclosure,
+      engineRoot: repoRoot,
+    }));
+    const payloads = prepared.map((entry) => {
+      if (entry.blockers.length > 0) return null;
+      const dataUri = buildReferenceDataUri({project: ctx.project, prepared: entry, purpose: 'simulation'});
+      return {
+        assetId: entry.assetId,
+        characters: dataUri.length,
+        sha256: createHash('sha256').update(dataUri).digest('hex'),
+      };
+    });
+    writeProjectJson(ctx.boundary, `${GENERATION_PATHS.reports}/${jobId}-references.json`, {
+      schemaVersion: 1,
+      projectId,
+      jobId,
+      disclosure,
+      prepared,
+      note: 'Reference payloads are never written to disk or printed. Only lengths and hashes are recorded.',
+    });
+    console.log(JSON.stringify({
+      projectId,
+      jobId,
+      provider: job.provider,
+      model: job.model,
+      disclosure,
+      uploadAdapter: createDeniedUploadAdapter().transport,
+      references: prepared,
+      payloads,
+      note: disclosure === 'not-authorized'
+        ? 'Local approval is not disclosure consent. Re-run with --authorize-disclosure to prepare a bounded payload for simulation.'
+        : 'Simulation payload prepared in memory only; PRIVATE_REFERENCE_UPLOAD = NOT_GRANTED.',
+    }, null, 2));
+    return prepared.every((entry) => entry.blockers.length === 0) ? 0 : 2;
+  }
+
+  if (command === 'validate-response') {
+    const jobId = arg('job');
+    if (!jobId) fail('--job is required');
+    const responseArg = arg('response');
+    if (!responseArg) fail('--response is required: a recorded provider response document');
+    const ctx = loadContext();
+    const job = jobsOrEmpty(ctx.project).find((entry) => entry.jobId === jobId);
+    if (!job) fail(`Unknown job ${jobId}`);
+    const recorded = JSON.parse(readFileSync(resolveProjectRelativePath(ctx.project.projectDir, responseArg, {engineRoot: repoRoot}), 'utf8'));
+    const taskId = typeof recorded.taskId === 'string' ? recorded.taskId : job.execution.providerTaskId;
+    if (!taskId) fail('No task id is available: record one in the response document or bind the job first');
+    const body = recorded.body ?? (Array.isArray(recorded.tasks) ? recorded.tasks[0]?.body : null) ?? recorded;
+    const transport = async () => ({status: 200, headers: {}, body: JSON.stringify(body)});
+    const provider = createRunwayProvider({transport, apiKey: 'simulation-key-never-live', baseUrl: requireRunwayBaseUrl()});
+    return provider.retrieve(taskId, {jobId, operation: job.operation, outputKind: job.output.kind})
+      .then((output) => {
+        const bound = bindProviderOutput({job: {...job, execution: {...job.execution, providerTaskId: taskId}}, output});
+        const policy = OUTPUT_HOST_POLICIES[job.provider];
+        const url = bound.file.source === 'https' ? validateOutputUrl(bound.file.location, policy) : null;
+        console.log(JSON.stringify({
+          projectId,
+          jobId,
+          accepted: true,
+          kind: bound.kind,
+          providerTaskId: bound.providerTaskId,
+          selectionPolicy: bound.selectionPolicy,
+          source: url ? {host: url.hostname, path: url.pathname, queryParameters: url.queryParameters} : {local: true},
+          note: 'Recorded response validated through the real adapter mapping. No request was made.',
+        }, null, 2));
+        return 0;
+      })
+      .catch((error) => {
+        console.log(JSON.stringify({projectId, jobId, accepted: false, reason: error instanceof Error ? error.message : String(error)}, null, 2));
+        return 1;
+      });
+  }
+
+  if (command === 'retrieve' || command === 'resume-retrieval') {
+    const jobId = arg('job');
+    if (!jobId) fail('--job is required');
+    const fixtureArg = arg('fixture', arg('fixtures'));
+    if (!fixtureArg) fail('--fixture is required: retrieval replays a recorded fixture, never a live endpoint');
+    const ctx = loadContext();
+    const job = jobsOrEmpty(ctx.project).find((entry) => entry.jobId === jobId);
+    if (!job) fail(`Unknown job ${jobId}`);
+    const blocked = retrievalBlocker(job);
+    if (blocked) fail(`Retrieval blocked: ${blocked}`);
+    const taskId = job.execution.providerTaskId;
+    const fixture = JSON.parse(readFileSync(resolveProjectRelativePath(ctx.project.projectDir, fixtureArg, {engineRoot: repoRoot}), 'utf8'));
+    const taskResponses = Array.isArray(fixture.tasks) ? fixture.tasks : [fixture.task];
+    if (taskResponses.length === 0 || !taskResponses[0]) fail('Fixture declares no task response');
+    let taskCursor = 0;
+    const taskTransport = async () => {
+      const entry = taskResponses[Math.min(taskCursor, taskResponses.length - 1)];
+      taskCursor += 1;
+      return {status: entry.status ?? 200, headers: entry.headers ?? {}, body: JSON.stringify(entry.body ?? {})};
+    };
+    const downloadScript = fixture.download;
+    if (!downloadScript || !Array.isArray(downloadScript.steps) || downloadScript.steps.length === 0) {
+      fail('Fixture declares no download script');
+    }
+    const policy = OUTPUT_HOST_POLICIES[job.provider];
+    if (!policy) fail(`Provider ${job.provider} has no output host policy`);
+    if (command === 'resume-retrieval') {
+      const cleared = clearRetrievalScratch(ctx.boundary, jobId);
+      console.error(`Resumed retrieval for ${jobId}; cleared task-owned scratch: ${cleared}`);
+    }
+    const maxBytesArg = arg('max-bytes');
+    let effectivePolicy = policy;
+    if (maxBytesArg !== undefined) {
+      const requested = Number(maxBytesArg);
+      if (!Number.isInteger(requested) || requested <= 0) fail('--max-bytes must be a positive integer');
+      if (requested > policy.maxBytes) {
+        fail(`--max-bytes may only tighten the ${policy.maxBytes} byte provider limit, never raise it`);
+      }
+      effectivePolicy = {...policy, maxBytes: requested};
+    }
+    const scripted = createScriptedDownloadTransport(downloadScript, (relative) =>
+      readFileSync(resolveProjectRelativePath(ctx.project.projectDir, relative, {engineRoot: repoRoot})));
+    const resolver = createScriptedResolver(downloadScript);
+    const provider = createRunwayProvider({transport: taskTransport, apiKey: 'simulation-key-never-live', baseUrl: requireRunwayBaseUrl()});
+    const rights = arg('rights', 'Simulated provider output; synthetic fixture bytes, no third-party rights');
+    const extension = job.output.kind === 'video' ? 'mp4' : 'png';
+    const destination = arg('out', `${GENERATION_PATHS.outputs}/${jobId}/${jobId}-provider.${extension}`);
+
+    const attempt = async (retriesLeft) => {
+      const output = await provider.retrieve(taskId, {
+        jobId,
+        operation: job.operation,
+        outputKind: job.output.kind,
+      });
+      const bound = bindProviderOutput({job, output});
+      if (bound.file.source !== 'https') fail('Simulated retrieval requires an HTTPS provider location');
+      const validated = validateOutputUrl(bound.file.location, effectivePolicy);
+      ensureSafeDirectory(ctx.boundary, path.dirname(path.join(ctx.project.projectDir, destination)), 'project');
+      assertSafePath(ctx.boundary, path.join(ctx.project.projectDir, destination), {expect: 'file', subtree: 'project'});
+      try {
+        return await retrieveRemoteOutput({
+          boundary: ctx.boundary,
+          jobId,
+          providerTaskId: bound.providerTaskId,
+          kind: bound.kind,
+          url: bound.file.location,
+          policy: effectivePolicy,
+          transport: scripted.transport,
+          resolver,
+          targetRelativePath: destination,
+        });
+      } catch (error) {
+        const recoverable = error && error.recoverable === true;
+        if (recoverable && retriesLeft > 0 && taskResponses.length > 1) {
+          console.error(`Recoverable retrieval failure (${error.code}); re-querying task ${taskId} for a fresh URL`);
+          return attempt(retriesLeft - 1);
+        }
+        throw error;
+      }
+    };
+
+    return attempt(1).then((result) => {
+      const updated = {
+        ...job,
+        execution: {
+          ...job.execution,
+          state: 'output-retrieved',
+          failure: null,
+          failureKind: null,
+          lastTransition: new Date().toISOString(),
+        },
+        result: {
+          files: [{
+            kind: job.output.kind,
+            path: result.record.storedPath,
+            sha256: result.record.sha256,
+            bytes: result.record.bytes,
+            marker: 'provider-output',
+          }],
+          derived: null,
+          manifestPath: job.result.manifestPath,
+          inspectedAt: new Date().toISOString(),
+        },
+      };
+      const all = jobsOrEmpty(ctx.project).filter((entry) => entry.jobId !== jobId);
+      all.push(updated);
+      persistJobs(ctx.boundary, all);
+      writeProjectJson(ctx.boundary, `${GENERATION_PATHS.reports}/${jobId}-retrieval.json`, {
+        schemaVersion: 1,
+        projectId,
+        jobId,
+        rights,
+        record: result.record,
+        requestedUrls: scripted.requestedUrls.map((value) => {
+          try {
+            const parsed = new URL(value);
+            return `${parsed.origin}${parsed.pathname}`;
+          } catch {
+            return '<invalid-url>';
+          }
+        }),
+        note: 'Signed query parameters are never recorded. Bytes came from a recorded fixture through an injected transport.',
+      });
+      console.log(JSON.stringify({
+        projectId,
+        jobId,
+        retrieved: true,
+        kind: job.output.kind,
+        stored: result.record.storedPath,
+        sha256: result.record.sha256,
+        bytes: result.record.bytes,
+        contentType: result.record.contentType,
+        source: result.record.source,
+        redirects: result.record.redirects,
+        note: 'Bytes were replayed from a fixture; no provider was contacted.',
+      }, null, 2));
+      return 0;
+    });
+  }
+
+  if (command === 'inspect-media') {
+    const fileArg = arg('file');
+    if (!fileArg) fail('--file is required');
+    const ctx = loadContext();
+    const absolute = resolveProjectRelativePath(ctx.project.projectDir, fileArg, {engineRoot: repoRoot});
+    const head = readFileSync(absolute).subarray(0, 16);
+    const isPng = head.length >= 8 && head.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    const isJpeg = head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff;
+    const base = {
+      projectId,
+      file: fileArg.split(path.sep).join('/'),
+      sha256: sha256File(absolute),
+      bytes: statSync(absolute).size,
+    };
+    if (isPng || isJpeg) {
+      const facts = inspectReferenceImage(readFileSync(absolute), path.basename(fileArg));
+      console.log(JSON.stringify({
+        ...base,
+        mediaKind: 'image',
+        image: {
+          mimeType: facts.mimeType,
+          width: facts.width,
+          height: facts.height,
+          aspectRatio: Number((facts.width / facts.height).toFixed(4)),
+        },
+        note: 'Content is validated by structure, never by filename extension.',
+      }, null, 2));
+      return 0;
+    }
+    const inspection = inspectVideoDeep(absolute, path.basename(fileArg));
+    console.log(JSON.stringify({
+      ...base,
+      mediaKind: 'video',
+      inspection,
+      note: 'Metadata comes from FFprobe plus a real decode pass; the filename extension is not trusted.',
+    }, null, 2));
+    return inspection.decodesCleanly ? 0 : 1;
+  }
+
+  if (command === 'normalize') {
+    const jobId = arg('job');
+    if (!jobId) fail('--job is required');
+    const ctx = loadContext();
+    const job = jobsOrEmpty(ctx.project).find((entry) => entry.jobId === jobId);
+    if (!job) fail(`Unknown job ${jobId}`);
+    const sourceRelative = arg('file', job.result.files[0]?.path);
+    if (!sourceRelative) fail('No provider output is recorded; retrieve one first or pass --file');
+    const targetFps = Number(arg('fps', job.output.fps));
+    const targetWidth = Number(arg('width', job.output.width ?? 0));
+    const targetHeight = Number(arg('height', job.output.height ?? 0));
+    if (!Number.isInteger(targetWidth) || !Number.isInteger(targetHeight)) {
+      fail('--width and --height are required when the job does not declare output dimensions');
+    }
+    const requiredDurationSeconds = (job.output.durationFrames ?? 0) / Math.max(1, targetFps);
+    if (!(requiredDurationSeconds > 0)) fail('The job declares no shot duration to normalize against');
+    const sourceAbsolute = resolveProjectRelativePath(ctx.project.projectDir, sourceRelative, {engineRoot: repoRoot});
+    const destinationRelative = `${GENERATION_PATHS.outputs}/${jobId}/normalized/${jobId}-normalized.mp4`;
+    ensureSafeDirectory(ctx.boundary, path.dirname(path.join(ctx.project.projectDir, destinationRelative)), 'project');
+    const destinationAbsolute = assertSafePath(
+      ctx.boundary,
+      path.join(ctx.project.projectDir, destinationRelative),
+      {expect: 'file', subtree: 'project'},
+    );
+    const rights = arg('rights', 'Derived locally from the recorded provider output; no third-party rights');
+    const outcome = normalizeVideo({
+      sourcePath: sourceAbsolute,
+      destinationPath: destinationAbsolute,
+      label: `${jobId} provider output`,
+      targetFps,
+      targetWidth,
+      targetHeight,
+      requiredDurationSeconds,
+    });
+    const timing = frameTimingPolicy(outcome);
+    const record = {
+      schemaVersion: 1,
+      normalizationVersion: NORMALIZATION_VERSION,
+      jobId,
+      providerTaskId: job.execution.providerTaskId,
+      original: {
+        path: sourceRelative.split(path.sep).join('/'),
+        sha256: sha256File(sourceAbsolute),
+        bytes: statSync(sourceAbsolute).size,
+        inspection: outcome.source,
+      },
+      derived: {
+        path: destinationRelative,
+        sha256: sha256File(destinationAbsolute),
+        bytes: statSync(destinationAbsolute).size,
+        inspection: outcome.derived,
+      },
+      profile: outcome.profile,
+      arguments: outcome.arguments,
+      timing: {
+        sourceFrameRate: outcome.source.averageFrameRate,
+        targetFrameRate: outcome.profile.targetFps,
+        sourceDurationSeconds: outcome.source.durationSeconds,
+        derivedDurationSeconds: outcome.derived.durationSeconds,
+        frameDuplicationPolicy: timing.frameDuplicationPolicy,
+        frameDropPolicy: timing.frameDropPolicy,
+      },
+      rotationCorrection: outcome.rotationCorrection,
+      rights,
+      review: 'pending',
+      createdAt: new Date().toISOString(),
+    };
+    writeProjectJson(ctx.boundary, `${GENERATION_PATHS.reports}/${jobId}-normalization.json`, record);
+    const updated = {
+      ...job,
+      result: {
+        ...job.result,
+        derived: {
+          kind: 'video',
+          path: destinationRelative,
+          sha256: record.derived.sha256,
+          bytes: record.derived.bytes,
+          marker: 'provider-output',
+          originalPath: record.original.path,
+          originalSha256: record.original.sha256,
+          normalizationVersion: NORMALIZATION_VERSION,
+        },
+        inspectedAt: new Date().toISOString(),
+      },
+    };
+    const all = jobsOrEmpty(ctx.project).filter((entry) => entry.jobId !== jobId);
+    all.push(updated);
+    persistJobs(ctx.boundary, all);
+    console.log(JSON.stringify({
+      projectId,
+      jobId,
+      normalized: true,
+      original: {path: record.original.path, sha256: record.original.sha256},
+      derived: {path: record.derived.path, sha256: record.derived.sha256},
+      profile: record.profile,
+      rotationCorrection: record.rotationCorrection,
+      timing: record.timing,
+      note: 'The provider original is untouched; the derived copy stays pending review.',
+    }, null, 2));
+    return 0;
+  }
+
+  if (command === 'compare-media') {
+    const originalArg = arg('original');
+    const derivedArg = arg('derived');
+    if (!originalArg || !derivedArg) fail('--original and --derived are required');
+    const ctx = loadContext();
+    const originalAbsolute = resolveProjectRelativePath(ctx.project.projectDir, originalArg, {engineRoot: repoRoot});
+    const derivedAbsolute = resolveProjectRelativePath(ctx.project.projectDir, derivedArg, {engineRoot: repoRoot});
+    const original = inspectVideoDeep(originalAbsolute, 'original');
+    const derived = inspectVideoDeep(derivedAbsolute, 'derived');
+    const compatible =
+      derived.container.split(',').includes('mp4')
+      && derived.codec === 'h264'
+      && derived.pixelFormat === NORMALIZATION_PROFILE.pixelFormat
+      && Math.abs(derived.rotation) < 0.01
+      && derived.decodesCleanly
+      && derived.audioStreamCount === 0;
+    console.log(JSON.stringify({
+      projectId,
+      original: {path: originalArg, sha256: sha256File(originalAbsolute), inspection: original},
+      derived: {path: derivedArg, sha256: sha256File(derivedAbsolute), inspection: derived},
+      rendererCompatible: compatible,
+      differences: {
+        codec: original.codec === derived.codec ? 'unchanged' : `${original.codec} -> ${derived.codec}`,
+        pixelFormat: original.pixelFormat === derived.pixelFormat ? 'unchanged' : `${original.pixelFormat} -> ${derived.pixelFormat}`,
+        frameRate: original.averageFrameRate === derived.averageFrameRate ? 'unchanged' : `${original.averageFrameRate} -> ${derived.averageFrameRate}`,
+        rotation: original.rotation === derived.rotation ? 'unchanged' : `${original.rotation} -> ${derived.rotation}`,
+        audioStreams: `${original.audioStreamCount} -> ${derived.audioStreamCount}`,
+      },
+      note: 'Both files are retained; the original hash is the provenance anchor.',
+    }, null, 2));
+    return compatible ? 0 : 1;
+  }
+
+  if (command === 'handoff' || command === 'stage') {
+    const jobId = arg('job');
+    if (!jobId) fail('--job is required');
+    const ctx = loadContext();
+    const job = jobsOrEmpty(ctx.project).find((entry) => entry.jobId === jobId);
+    if (!job) fail(`Unknown job ${jobId}`);
+    const fileArg = arg('file', job.result.derived?.path ?? job.result.files[0]?.path);
+    if (!fileArg) fail('--file is required: this job has no recorded provider output');
     const requirement = ctx.storyboard.assetRequirements.find((entry) => entry.id === job.requirementId);
     if (!requirement) fail(`Job ${jobId} references unknown requirement ${job.requirementId}`);
     if (requirement.fingerprint !== job.requirementFingerprint) {
@@ -654,22 +1202,55 @@ const run = () => {
     if (!existsSync(source)) fail(`Provider output ${fileArg} does not exist`);
     const rights = arg('rights');
     if (!rights) fail('--rights is required: record the rights assertion for this output');
+    const derived = job.result.derived ?? null;
+    const normalizedPath = derived?.path ? derived.path.split(path.sep).join('/') : null;
+    const usingDerived = normalizedPath !== null && normalizedPath === fileArg.split(path.sep).join('/');
+    if (usingDerived && (!derived.originalPath || !derived.originalSha256 || !derived.normalizationVersion)) {
+      fail('The derived result is missing its original provenance; re-run normalize');
+    }
     const provider = createOfflineProvider({outputRoot: path.join(ctx.project.projectDir, GENERATION_PATHS.outputs), jobId});
     const staged = stageGenerationOutput({
       project: ctx.project,
       boundary: ctx.boundary,
-      job: {...job, result: {files: [{kind: job.output.kind, path: source, sha256: '', bytes: 0, marker: 'provider-output'}], manifestPath: null, inspectedAt: null}},
+      job: {
+        ...job,
+        result: {
+          files: [{kind: job.output.kind, path: source, sha256: '', bytes: 0, marker: 'provider-output'}],
+          derived: null,
+          manifestPath: null,
+          inspectedAt: null,
+        },
+      },
       provider,
       sourceFile: source,
       requirement,
       requirements: ctx.storyboard.assetRequirements,
       rights,
+      derived: usingDerived
+        ? {
+            originalPath: derived.originalPath,
+            originalSha256: derived.originalSha256,
+            normalizationVersion: derived.normalizationVersion,
+            arguments: [],
+          }
+        : null,
+      replaceApproved: hasFlag('replace-approved')
+        ? {authorized: true, reason: arg('reason', '')}
+        : null,
     });
+    const stagedFile = {
+      kind: job.output.kind,
+      path: staged.record.path,
+      sha256: staged.record.sha256,
+      bytes: staged.record.fileSizeBytes,
+      marker: 'provider-output',
+    };
     const updated = {
       ...job,
       execution: {...job.execution, state: 'output-retrieved', lastTransition: new Date().toISOString()},
       result: {
-        files: [{kind: job.output.kind, path: staged.record.path, sha256: staged.record.sha256, bytes: staged.record.fileSizeBytes, marker: 'provider-output'}],
+        files: job.result.files.length > 0 ? job.result.files : [stagedFile],
+        derived: usingDerived ? stagedFile : job.result.derived ?? null,
         manifestPath: path.relative(ctx.project.projectDir, staged.manifestPath).split(path.sep).join('/'),
         inspectedAt: new Date().toISOString(),
       },
@@ -678,7 +1259,14 @@ const run = () => {
     const all = jobsOrEmpty(ctx.project).filter((entry) => entry.jobId !== jobId);
     all.push(updated);
     persistJobs(ctx.boundary, all);
-    console.log(JSON.stringify({projectId, jobId, staged: staged.record, technical: staged.technical, note: 'Pending review; nothing is approved automatically.'}, null, 2));
+    console.log(JSON.stringify({
+      projectId,
+      jobId,
+      staged: staged.record,
+      technical: staged.technical,
+      derivedFrom: usingDerived ? derived.originalPath : null,
+      note: 'Pending review; nothing is approved automatically.',
+    }, null, 2));
     return 0;
   }
 
@@ -726,6 +1314,49 @@ const run = () => {
         : 'Output is rejected; the requirement stays unfulfilled.',
     }, null, 2));
     return 0;
+  }
+
+  if (command === 'blockers') {
+    const jobId = arg('job');
+    if (!jobId) fail('--job is required');
+    const ctx = loadContext();
+    const job = jobsOrEmpty(ctx.project).find((entry) => entry.jobId === jobId);
+    if (!job) fail(`Unknown job ${jobId}`);
+    const requirement = ctx.storyboard.assetRequirements.find((entry) => entry.id === job.requirementId);
+    const intakeRaw = readOptionalProjectJson(ctx.project.projectDir, PREPRODUCTION_PATHS.assetIntake);
+    const intake = intakeRaw
+      ? validateAssetIntake(intakeRaw, {projectId, requirements: ctx.storyboard.assetRequirements})
+      : null;
+    const record = intake?.records.find((entry) => entry.requirementId === job.requirementId) ?? null;
+    const blockers = [];
+    if (!requirement) blockers.push(`requirement ${job.requirementId} no longer exists in the storyboard`);
+    if (requirement && requirement.fingerprint !== job.requirementFingerprint) {
+      blockers.push('the requirement changed after the job was prepared; re-prepare instead of binding stale bytes');
+    }
+    if (!job.execution.providerTaskId) blockers.push('no provider task id is recorded');
+    if (job.result.files.length === 0) blockers.push('no provider output bytes are stored');
+    if (!record) blockers.push('no asset intake record exists for this requirement');
+    if (record && record.review === 'pending') blockers.push('the intake record is pending a reviewer decision');
+    if (record && record.review === 'in-review') blockers.push('the intake record is still in review');
+    if (record && record.review === 'rejected') blockers.push('the intake record was rejected');
+    if (!ctx.storyboard.renderReady) {
+      blockers.push(`storyboard revision ${ctx.storyboard.revision} is not render-ready: ${ctx.storyboard.missingAssetRequirements.join(', ') || 'no details'}`);
+    }
+    if (ctx.storyboard.status !== 'approved') blockers.push(`storyboard revision ${ctx.storyboard.revision} is ${ctx.storyboard.status}`);
+    console.log(JSON.stringify({
+      projectId,
+      jobId,
+      requirementId: job.requirementId,
+      execution: job.execution.state,
+      review: job.review.state,
+      intakeReview: record ? record.review : null,
+      storyboardRevision: ctx.storyboard.revision,
+      renderReady: ctx.storyboard.renderReady,
+      blockers,
+      ready: blockers.length === 0,
+      note: 'A technical PASS is never an approval; the reviewer decision is the only path to a bound asset.',
+    }, null, 2));
+    return blockers.length === 0 ? 0 : 2;
   }
 
   if (command === 'report') {

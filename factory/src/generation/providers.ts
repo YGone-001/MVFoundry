@@ -16,10 +16,12 @@ import type {
   ProviderCapabilities,
   ProviderOutput,
   ProviderRequest,
+  ProviderRetrieveExpectation,
   ProviderStatusResult,
   ProviderSubmitResult,
 } from './types';
 import {RUNWAY_API_VERSION} from './types';
+import {expectedOutputKindForOperation, isCompatibleOutputKind, parseTaskDocument} from './outputContract';
 
 const RATIO_TOLERANCE = 0.02;
 
@@ -118,6 +120,8 @@ export const RUNWAY_CAPABILITIES: ProviderCapabilities = {
     `Contract: POST /v1/text_to_image, POST /v1/image_to_video, GET /v1/tasks/{id}, header X-Runway-Version: ${RUNWAY_API_VERSION}.`,
     'Durations are limited to the documented set; a shot longer than the largest supported clip must be split or reduced.',
     'Alpha output is not advertised by these models; a transparent layer requirement cannot be satisfied by this provider.',
+    'Output kind is bound to the submitted operation: text-to-image yields image, image-to-video yields video.',
+    'Result URLs are ephemeral (documented as expiring within 24-48 hours) and must be retrieved into project storage.',
     'No live request was made while implementing or testing this adapter.',
   ],
 };
@@ -429,10 +433,25 @@ export const createOfflineProvider = (options: OfflineProviderOptions): Generati
       progress: lastOutput ? 1 : 0,
       failure: lastOutput ? null : 'no offline submission recorded',
       outputUrl: null,
+      outputUrls: [],
     }),
-    retrieve: async (): Promise<ProviderOutput> => {
+    retrieve: async (
+      taskId: string,
+      expectation: ProviderRetrieveExpectation,
+    ): Promise<ProviderOutput> => {
       if (!lastOutput) throw new Error('offline provider has no completed submission to retrieve');
-      return lastOutput;
+      if (!isCompatibleOutputKind(expectation.operation, expectation.outputKind)) {
+        throw new Error(
+          `offline provider cannot satisfy job ${expectation.jobId}: ${expectation.operation} does not produce ${expectation.outputKind}`,
+        );
+      }
+      const file = lastOutput.files[0];
+      if (!file || file.kind !== expectation.outputKind) {
+        throw new Error(
+          `offline provider produced ${file?.kind ?? 'no'} output for a job expecting ${expectation.outputKind}`,
+        );
+      }
+      return {...lastOutput, providerTaskId: taskId, declaredKind: expectation.outputKind};
     },
     cancel: null,
   };
@@ -472,6 +491,12 @@ export const createRunwayProvider = (options: RunwayAdapterOptions): GenerationP
 } => {
   const baseUrl = options.baseUrl;
   let lastRequestRecord: HttpRequest | null = null;
+  /**
+   * Task identity is bound at submission time so retrieval can prove which
+   * operation produced a task. The map is in-memory only: after a restart the
+   * persisted job supplies the expectation and a mismatch fails closed.
+   */
+  const submittedTasks = new Map<string, {operation: GenerationOperation; outputKind: GenerationOutputKind}>();
   const send = async (request: HttpRequest): Promise<HttpResponse> => {
     lastRequestRecord = {...request, headers: {...request.headers, Authorization: 'Bearer <redacted>'}};
     if (!options.apiKey) {
@@ -531,6 +556,10 @@ export const createRunwayProvider = (options: RunwayAdapterOptions): GenerationP
       const parsed = parse(response, 'submission');
       const taskId = typeof parsed.id === 'string' ? parsed.id : null;
       if (!taskId) throw new Error('Runway submission returned no task id');
+      submittedTasks.set(taskId, {
+        operation: request.operation,
+        outputKind: expectedOutputKindForOperation(request.operation),
+      });
       return {taskId, state: 'submitted'};
     },
     status: async (taskId: string): Promise<ProviderStatusResult> => {
@@ -540,39 +569,52 @@ export const createRunwayProvider = (options: RunwayAdapterOptions): GenerationP
         headers: headers(),
         body: null,
       });
-      const parsed = parse(response, 'task status');
-      const raw = String(parsed.status ?? '').toUpperCase();
-      const map: Record<string, ProviderStatusResult['state']> = {
-        PENDING: 'queued',
-        THROTTLED: 'queued',
-        RUNNING: 'running',
-        SUCCEEDED: 'succeeded',
-        FAILED: 'failed',
-        CANCELLED: 'canceled',
-      };
-      const state = map[raw];
-      if (!state) throw new Error(`Runway returned an unrecognized task status`);
-      const failure =
-        state === 'failed'
-          ? String((parsed.failure as string | undefined) ?? 'provider reported failure')
-          : null;
-      const output = Array.isArray(parsed.output) ? parsed.output.filter((value): value is string => typeof value === 'string') : [];
-      return {
-        state,
-        progress: typeof parsed.progress === 'number' ? parsed.progress : null,
-        failure,
-        outputUrl: output[0] ?? null,
-      };
+      return parseTaskDocument({
+        expectedTaskId: taskId,
+        body: parse(response, 'task status'),
+        statusMap: {
+          PENDING: 'queued',
+          THROTTLED: 'queued',
+          RUNNING: 'running',
+          SUCCEEDED: 'succeeded',
+          FAILED: 'failed',
+          CANCELLED: 'canceled',
+        },
+      });
     },
-    retrieve: async (taskId: string): Promise<ProviderOutput> => {
+    retrieve: async (
+      taskId: string,
+      expectation: ProviderRetrieveExpectation,
+    ): Promise<ProviderOutput> => {
+      const expected = expectedOutputKindForOperation(expectation.operation);
+      if (expectation.outputKind !== expected) {
+        throw new Error(
+          `Job ${expectation.jobId} expects ${expectation.outputKind} but ${expectation.operation} produces ${expected}`,
+        );
+      }
+      const recorded = submittedTasks.get(taskId);
+      if (recorded && recorded.operation !== expectation.operation) {
+        throw new Error(
+          `Task ${taskId} was submitted for ${recorded.operation}; job ${expectation.jobId} expects ${expectation.operation}`,
+        );
+      }
       const status = await provider.status(taskId);
-      if (status.state !== 'succeeded' || !status.outputUrl) {
+      if (status.state !== 'succeeded') {
         throw new Error(`Runway task ${taskId} is ${status.state}; no output is available`);
       }
+      if (status.outputUrls.length !== 1) {
+        throw new Error(
+          `Runway task ${taskId} returned ${status.outputUrls.length} output URLs; the adapter binds exactly one`,
+        );
+      }
       return {
-        files: [{kind: 'video', source: 'https', location: status.outputUrl, bytes: null}],
+        files: [{kind: expected, source: 'https', location: status.outputUrls[0], bytes: null}],
         providerTaskId: taskId,
-        notes: [`output url ${redactUrl(status.outputUrl)}`],
+        declaredKind: expected,
+        notes: [
+          `output url ${redactUrl(status.outputUrls[0])}`,
+          'signed query parameters are not recorded',
+        ],
       };
     },
     cancel: null,
