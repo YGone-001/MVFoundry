@@ -97,6 +97,8 @@ test('G12: workflow runs the required engine and security commands', () => {
     'npm run generation:verify',
     'npm run provider:seed',
     'npm run provider:verify',
+    'npm run golive:seed',
+    'npm run golive:verify',
     'npm run audit:publication',
     'npm run audit:git',
   ]) {
@@ -155,6 +157,8 @@ test('G12: workspace is initialized from RUNNER_TEMP via GITHUB_ENV before seedi
   const generationVerifyIndex = names.indexOf('Verify generation jobs, offline provider and simulated adapter');
   const providerSeedIndex = names.indexOf('Seed provider output workspace');
   const providerVerifyIndex = names.indexOf('Verify provider retrieval, normalization and real renders');
+  const goliveSeedIndex = names.indexOf('Seed go-live readiness workspace');
+  const goliveVerifyIndex = names.indexOf('Verify go-live readiness, spend controls and transport policy');
   assert.ok(provisionIndex >= 0 && ffmpegIndex > provisionIndex, 'FFmpeg provisioning must precede verification');
   assert.ok(typecheckIndex > ffmpegIndex, 'FFmpeg must be provisioned and verified before typecheck');
   assert.ok(testIndex > typecheckIndex, 'tests must follow typecheck');
@@ -175,8 +179,10 @@ test('G12: workspace is initialized from RUNNER_TEMP via GITHUB_ENV before seedi
   assert.ok(generationVerifyIndex > generationSeedIndex, 'generation verification must follow its seeding');
   assert.ok(providerSeedIndex > generationVerifyIndex, 'provider-output seeding must follow generation verification');
   assert.ok(providerVerifyIndex > providerSeedIndex, 'provider-output verification must follow its seeding');
-  assert.ok(names.indexOf('Publication audit') > providerVerifyIndex, 'publication audit must follow provider-output verification');
-  assert.ok(names.indexOf('Git media audit') > providerVerifyIndex, 'Git media audit must follow provider-output verification');
+  assert.ok(goliveSeedIndex > providerVerifyIndex, 'go-live seeding must follow provider-output verification');
+  assert.ok(goliveVerifyIndex > goliveSeedIndex, 'go-live verification must follow its seeding');
+  assert.ok(names.indexOf('Publication audit') > goliveVerifyIndex, 'publication audit must follow go-live verification');
+  assert.ok(names.indexOf('Git media audit') > goliveVerifyIndex, 'Git media audit must follow go-live verification');
   assert.ok(!names.includes('Record media/audio render limitation'), 'audio acceptance must not be skippable');
 
   const provision = steps[provisionIndex];
@@ -216,6 +222,8 @@ test('G12: workspace is initialized from RUNNER_TEMP via GITHUB_ENV before seedi
     ['generation verify', steps[generationVerifyIndex]],
     ['provider seed', steps[providerSeedIndex]],
     ['provider verify', steps[providerVerifyIndex]],
+    ['go-live seed', steps[goliveSeedIndex]],
+    ['go-live verify', steps[goliveVerifyIndex]],
   ] as const) {
     assert.doesNotMatch(step.lines.join('\n'), /^\s*if:/m, `${name} must not be conditionally skipped`);
   }

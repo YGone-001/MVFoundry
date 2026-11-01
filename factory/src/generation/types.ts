@@ -6,6 +6,10 @@ export const RUNWAY_API_VERSION = '2024-11-06';
 export const PROVIDER_OUTPUT_SCHEMA_VERSION = 1;
 export const RETRIEVAL_POLICY_VERSION = 'provider-retrieval-v1';
 export const NORMALIZATION_VERSION = 'video-normalize-v1';
+export const PRICING_SCHEMA_VERSION = 1;
+export const LEDGER_SCHEMA_VERSION = 1;
+export const TRANSPORT_POLICY_VERSION = 'live-transport-v1';
+export const FINALIZATION_SCHEMA_VERSION = 1;
 
 export type GenerationProviderId = 'offline-fixture' | 'runway';
 export type GenerationOperation = 'text-to-image' | 'image-to-video' | 'text-to-video';
@@ -485,3 +489,231 @@ export type GenerationPrepareInput = {
 };
 
 export type RequirementKindForOutput = AssetRequirementKind;
+
+// ---------------------------------------------------------------------------
+// Live transport (disabled by default)
+// ---------------------------------------------------------------------------
+
+export type TransportErrorCode =
+  | 'live-not-authorized'
+  | 'host-not-allowed'
+  | 'malformed-url'
+  | 'unsupported-protocol'
+  | 'credentials-in-url'
+  | 'dns-failure'
+  | 'blocked-address'
+  | 'proxy-not-supported'
+  | 'connect-timeout'
+  | 'response-timeout'
+  | 'response-too-large'
+  | 'redirect-not-followed'
+  | 'authorization-header-refused'
+  | 'tls-verification-failed'
+  | 'certificate-hostname-mismatch'
+  | 'authentication-failed'
+  | 'rate-limited'
+  | 'provider-unavailable'
+  | 'request-failed';
+
+export type DestinationDecision = 'allowed' | 'blocked-address';
+
+/** Address policy is injected so tests can run against a controlled local host. */
+export type DestinationClassifier = (address: string) => DestinationDecision;
+
+export type TransportRequest = {
+  method: 'GET' | 'POST';
+  url: string;
+  headers: Record<string, string>;
+  body: string | null;
+  /** Hostnames allowed to receive the authorization header. */
+  authorizationHosts: string[];
+};
+
+export type TransportResponse = {
+  status: number;
+  headers: Record<string, string>;
+  body: string;
+  /** Address the socket actually connected to, when the transport reports it. */
+  connectedAddress: string | null;
+  tlsServername: string | null;
+};
+
+// ---------------------------------------------------------------------------
+// Pricing snapshots and estimates
+// ---------------------------------------------------------------------------
+
+export type PricingUnit = 'per-image' | 'per-second';
+
+export type PricingTier = {
+  /** Inclusive lower bound of the priced dimension. */
+  min: number;
+  /** Inclusive upper bound, or null when unbounded. */
+  max: number | null;
+  creditsPerUnit: number;
+};
+
+export type ModelPrice = {
+  model: string;
+  operation: GenerationOperation;
+  unit: PricingUnit;
+  /** Dimension the tiers apply to: output pixels long edge for images, seconds for video. */
+  tierDimension: 'long-edge' | 'duration-seconds';
+  tiers: PricingTier[];
+  /** Minimum billable credits, when the provider documents one. */
+  minimumCredits: number | null;
+  /** Credits charged per input reference, when documented. */
+  creditsPerReference: number | null;
+  notes: string[];
+};
+
+export type PricingSnapshot = {
+  schemaVersion: typeof PRICING_SCHEMA_VERSION;
+  provider: GenerationProviderId;
+  pricingVersion: string;
+  snapshotSha256: string;
+  sourceUrl: string;
+  retrievedAt: string;
+  creditToUsd: number;
+  currency: 'USD';
+  rounding: 'round-up-to-credit' | 'exact';
+  taxNote: string;
+  models: ModelPrice[];
+  unsupported: Array<{model: string; reason: string}>;
+  caveats: string[];
+};
+
+export type CostEstimate = {
+  schemaVersion: typeof PRICING_SCHEMA_VERSION;
+  provider: GenerationProviderId;
+  model: string;
+  operation: GenerationOperation;
+  pricingVersion: string;
+  snapshotSha256: string;
+  retrievedAt: string;
+  billableUnits: number;
+  unit: PricingUnit;
+  tierApplied: PricingTier;
+  referenceCount: number;
+  referenceCredits: number;
+  subtotalCredits: number;
+  minimumApplied: boolean;
+  estimatedCredits: number;
+  estimatedUsd: number;
+  /** True when the estimate is an upper bound for the documented tariff. */
+  conservative: true;
+  caveats: string[];
+};
+
+export type PricingDecisionCode =
+  | 'unknown-model'
+  | 'unsupported-pricing'
+  | 'stale-snapshot'
+  | 'invalid-request';
+
+export type PricingDecision = {
+  ok: boolean;
+  estimate: CostEstimate | null;
+  code: PricingDecisionCode | null;
+  message: string | null;
+};
+
+// ---------------------------------------------------------------------------
+// Spending ledger
+// ---------------------------------------------------------------------------
+
+export type LedgerEntryStatus =
+  | 'reserved'
+  | 'submitted'
+  | 'reconciled-known'
+  | 'reconciled-unknown'
+  | 'released'
+  | 'canceled';
+
+export type ChargeClassification = 'unknown' | 'estimated' | 'user-entered' | 'provider-reported';
+
+export type LedgerEntry = {
+  entryId: string;
+  projectId: string;
+  jobId: string;
+  provider: GenerationProviderId;
+  model: string;
+  operation: GenerationOperation;
+  authorizationRevision: number;
+  authorizedMaxUsd: number;
+  authorizedMaxCredits: number | null;
+  estimatedUsd: number;
+  estimatedCredits: number;
+  reservedUsd: number;
+  actualUsd: number | null;
+  actualClassification: ChargeClassification;
+  releasedUsd: number;
+  submissionCount: number;
+  providerTaskId: string | null;
+  status: LedgerEntryStatus;
+  pricingVersion: string;
+  createdAt: string;
+  updatedAt: string;
+  provenance: string;
+  notes: string[];
+};
+
+export type LedgerDocument = {
+  schemaVersion: typeof LEDGER_SCHEMA_VERSION;
+  projectId: string;
+  revision: number;
+  entries: LedgerEntry[];
+  /** Project-wide ceiling; null means each job is capped only by its own record. */
+  projectCeilingUsd: number | null;
+  /** Durable record of explicit operator interventions such as a forced unlock. */
+  interventions?: Array<{at: string; action: string; note: string}>;
+};
+
+export type LedgerSummary = {
+  projectId: string;
+  projectCeilingUsd: number | null;
+  reservedUsd: number;
+  actualKnownUsd: number;
+  actualUnknownCount: number;
+  releasedUsd: number;
+  remainingUsd: number | null;
+  entries: number;
+  uncertainEntries: string[];
+};
+
+// ---------------------------------------------------------------------------
+// Atomic finalization and crash recovery
+// ---------------------------------------------------------------------------
+
+export type FinalizationPhase =
+  | 'idle'
+  | 'downloading'
+  | 'downloaded'
+  | 'validated'
+  | 'finalizing'
+  | 'finalized'
+  | 'manifested'
+  | 'intake-pending'
+  | 'approved'
+  | 'failed';
+
+export type RetrievalState = {
+  schemaVersion: typeof FINALIZATION_SCHEMA_VERSION;
+  jobId: string;
+  providerTaskId: string | null;
+  phase: FinalizationPhase;
+  tempPath: string | null;
+  targetPath: string | null;
+  sha256: string | null;
+  bytes: number | null;
+  message: string | null;
+  updatedAt: string;
+};
+
+export type RecoveryClassification =
+  | 'no-media'
+  | 'incomplete-temp'
+  | 'downloaded-not-finalized'
+  | 'finalized-not-manifested'
+  | 'finalized-awaiting-review'
+  | 'approved'
+  | 'ambiguous';

@@ -137,6 +137,14 @@ Preproduction files (`annotations.json`, `creative-brief.json`, optional lyrics,
 - Successful retrieval finalizes by renaming the file into `<project>/generation/outputs/<jobId>/`, and the retrieved bytes are hashed before and after finalization.
 - Nothing is written outside the authorized project, and no provider URL is ever used as a local path.
 
+## Spend ledger and finalization state
+
+- `<project>/generation/ledger.json` is the only spend authority. Writes happen under an exclusive `<project>/generation/ledger.lock` created with an atomic `open(…, 'wx')`.
+- A lock older than the stale threshold is never deleted automatically. It fails closed with `lock-stale` and requires `generation ledger-unlock --confirm`, which records the intervention in the ledger document.
+- The ledger is replaced atomically: a crash leaves either the previous document or the new one, never a partial write.
+- `<project>/generation/state/<jobId>.json` records the retrieval finalization phase. It is written through the write boundary and never outside the project.
+- A published provider output is only ever created by renaming a file whose size and SHA256 were verified; a failed finalization removes every partial artefact.
+
 ## Tests
 
 The engine tests cover:

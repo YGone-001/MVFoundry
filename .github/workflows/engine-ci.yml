@@ -101,6 +101,10 @@ jobs:
         run: npm run provider:seed
       - name: Verify provider retrieval, normalization and real renders
         run: npm run provider:verify
+      - name: Seed go-live readiness workspace
+        run: npm run golive:seed
+      - name: Verify go-live readiness, spend controls and transport policy
+        run: npm run golive:verify
       - name: Publication audit
         run: npm run audit:publication
       - name: Git media audit

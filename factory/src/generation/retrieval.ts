@@ -1,10 +1,8 @@
 import {createHash} from 'node:crypto';
 import {
   closeSync,
-  copyFileSync,
   existsSync,
   openSync,
-  renameSync,
   rmSync,
   statSync,
   writeSync,
@@ -13,6 +11,7 @@ import path from 'node:path';
 import {RetrievalError, type RetrievalErrorCode} from '../errors';
 import type {GenerationOutputKind, GenerationProviderId, OutputHostPolicy, RedactedSourceIdentity, RetrievalRecord} from './types';
 import {RETRIEVAL_POLICY_VERSION} from './types';
+import {finalizeDownloadedFile, writeRetrievalState} from './finalization';
 import {
   assertSafePath,
   ensureSafeDirectory,
@@ -245,6 +244,8 @@ export type RetrieveRemoteOutputInput = {
   resolver: (hostname: string) => Promise<string[]>;
   /** Project-relative destination, always inside the authorized project. */
   targetRelativePath: string;
+  /** Only an explicit replacement may overwrite a previously finalized output. */
+  overwriteFinalized?: boolean;
   now?: () => number;
 };
 
@@ -379,6 +380,16 @@ export const retrieveRemoteOutput = async (
   const digest = createHash('sha256');
   const headChunks: Buffer[] = [];
   let headBytes = 0;
+  writeRetrievalState(input.boundary, {
+    jobId: input.jobId,
+    providerTaskId: input.providerTaskId,
+    phase: 'downloading',
+    tempPath: path.relative(input.boundary.projectRoot, tempPath).split(path.sep).join('/'),
+    targetPath: input.targetRelativePath.split(path.sep).join('/'),
+    sha256: null,
+    bytes: null,
+    message: null,
+  });
   try {
     if (existsSync(tempPath)) rmSync(tempPath, {force: true});
     handle = openSync(tempPath, 'wx');
@@ -415,16 +426,47 @@ export const retrieveRemoteOutput = async (
     const magic = Buffer.concat(headChunks).subarray(0, headBytes);
     assertMediaMagic(magic, contentType, `Job ${input.jobId} output`);
     const sha256 = digest.digest('hex');
-    ensureSafeDirectory(input.boundary, path.dirname(targetAbsolute), 'project');
-    const finalTarget = assertSafePath(input.boundary, targetAbsolute, {expect: 'file', subtree: 'project'});
-    try {
-      renameSync(tempPath, finalTarget);
-    } catch {
-      copyFileSync(tempPath, finalTarget);
-      rmSync(tempPath, {force: true});
-    }
-    const bytes = statSync(finalTarget).size;
-    if (bytes !== written) fail('truncated', 'Finalized output size does not match the downloaded byte count');
+    const relativeTemp = path.relative(input.boundary.projectRoot, tempPath).split(path.sep).join('/');
+    writeRetrievalState(input.boundary, {
+      jobId: input.jobId,
+      providerTaskId: input.providerTaskId,
+      phase: 'validated',
+      tempPath: relativeTemp,
+      targetPath: input.targetRelativePath.split(path.sep).join('/'),
+      sha256,
+      bytes: written,
+      message: null,
+    });
+    writeRetrievalState(input.boundary, {
+      jobId: input.jobId,
+      providerTaskId: input.providerTaskId,
+      phase: 'finalizing',
+      tempPath: relativeTemp,
+      targetPath: input.targetRelativePath.split(path.sep).join('/'),
+      sha256,
+      bytes: written,
+      message: null,
+    });
+    const finalized = finalizeDownloadedFile({
+      boundary: input.boundary,
+      jobId: input.jobId,
+      providerTaskId: input.providerTaskId,
+      tempPath,
+      targetRelativePath: input.targetRelativePath,
+      expectedSha256: sha256,
+      expectedBytes: written,
+      overwriteFinalized: input.overwriteFinalized === true,
+    });
+    writeRetrievalState(input.boundary, {
+      jobId: input.jobId,
+      providerTaskId: input.providerTaskId,
+      phase: 'finalized',
+      tempPath: null,
+      targetPath: input.targetRelativePath.split(path.sep).join('/'),
+      sha256: finalized.sha256,
+      bytes: finalized.bytes,
+      message: finalized.idempotent ? 'existing finalized output reused' : null,
+    });
     return {
       record: {
         schemaVersion: 1,
@@ -435,12 +477,12 @@ export const retrieveRemoteOutput = async (
         source: redactSource(current),
         redirects,
         contentType,
-        bytes,
-        sha256,
+        bytes: finalized.bytes,
+        sha256: finalized.sha256,
         storedPath: input.targetRelativePath.split(path.sep).join('/'),
         elapsedMs: now() - started,
       },
-      absolutePath: finalTarget,
+      absolutePath: finalized.absolutePath,
       head: magic,
     };
   } catch (error) {
@@ -458,6 +500,16 @@ export const retrieveRemoteOutput = async (
         // A failed cleanup must not mask the original retrieval error.
       }
     }
+    writeRetrievalState(input.boundary, {
+      jobId: input.jobId,
+      providerTaskId: input.providerTaskId,
+      phase: 'failed',
+      tempPath: null,
+      targetPath: input.targetRelativePath.split(path.sep).join('/'),
+      sha256: null,
+      bytes: null,
+      message: error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300),
+    });
     throw error;
   }
 };

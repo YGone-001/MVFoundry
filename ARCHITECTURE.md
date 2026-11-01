@@ -150,6 +150,13 @@ Preproduction is a local planning layer, not semantic music understanding and no
 - `factory/src/generation/recovery.ts` owns task-id durability: submission is recorded before polling, attempt history is append-only, conflicting task ids are a hard failure, an uncertain submission stays parked, and retrieval failure is distinguishable from generation failure.
 - `factory/src/media/videoNormalize.ts` performs deep FFprobe inspection plus a real decode pass, then a single reviewed normalization profile (VFR to explicit CFR, display-matrix rotation correction, fit-pad scaling, audio stripping) with structured FFmpeg arguments. The derived file is re-inspected against the renderer contract and both files are retained with their hashes, inspections, arguments and timing changes.
 - `factory/scripts/seed-provider-workspace.mjs` and `factory/scripts/verify-provider-output.mjs` implement the acceptance suite: simulated remote result → real local bytes → validated/normalized file → approved asset → real rendered video, with decoded frames and soundtrack inspected, plus the refusal and recovery matrix.
+- `factory/src/generation/transport.ts` is the only executable network path. It is inert unless explicitly enabled, binds the socket to a validated DNS answer while keeping the DNS name for SNI and certificate verification, refuses the authorization header for delivery hosts, refuses a configured proxy, never relaxes TLS and never follows redirects.
+- `factory/src/generation/pricing.ts` holds a versioned, hash-verified pricing snapshot and a conservative estimator that refuses unknown, unsupported, tampered or stale prices instead of inferring a rate.
+- `factory/src/generation/ledger.ts` is the only spend authority: reservations are taken under an exclusive filesystem lock, an uncertain outcome keeps its reservation exposed, a stale lock fails closed, and charges are only recorded with their evidence classification.
+- `factory/src/generation/retry.ts` separates retryable status/retrieval failures from billable submission, which is never retried automatically.
+- `factory/src/generation/finalization.ts` publishes provider output only by renaming a verified file, records the finalization phase durably, and classifies what a restart finds instead of guessing.
+- `factory/src/generation/preflight.ts` produces the operator readiness report, keeping technical readiness, policy gates and authorization strictly separate.
+- `factory/scripts/seed-golive-workspace.mjs` and `factory/scripts/verify-golive-readiness.mjs` implement the go-live acceptance suite: pricing, cross-process budget races, transport and retrieval negatives, crash recovery, and a full generation-to-render regression.
 
 ## 10. Renderers and project scene modules
 

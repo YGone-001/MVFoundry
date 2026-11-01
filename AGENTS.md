@@ -174,8 +174,59 @@ Do not treat plans, prior reports or user summaries as proof of the current file
 ### Provider acceptance and CI isolation
 
 - `npm run provider:seed` creates `synthetic-provider-image-demo`, `synthetic-provider-video-demo`, `synthetic-provider-hybrid-demo` and `synthetic-provider-guard-demo` in a fresh external workspace. `npm run provider:verify` is mandatory in Windows CI and runs entirely through injected fake transports.
+- `npm run golive:seed` and `npm run golive:verify` are the go-live readiness suite: pricing, spend reservations, cross-process concurrency, transport policy, retrieval finalization, crash recovery, operator preflight and a full generation-to-render regression. Both are mandatory in Windows CI and are never conditionally skipped.
 - Acceptance means: simulated remote result → real local bytes → validated/normalized file → approved asset → real rendered video, with decoded frames and soundtrack inspected. A TypeScript build or a simulated API response alone is not acceptance.
 - The verifier must never be conditionally skipped, never upload artifacts, and never receive credentials.
+
+### Network transport trust
+
+- `factory/src/generation/transport.ts` is the only executable network path. It is inert unless `liveExecutionEnabled` is explicitly true, and no code in this phase sets it. `LIVE_PROVIDER_EXECUTION` remains `NOT_GRANTED`.
+- A request is only permitted to a host named in the provider endpoint policy. The API host and the signed-output delivery hosts are different trust domains: the authorization header is refused for any host outside `authorizationHosts`.
+- DNS answers are resolved through an injected resolver and screened by an injected address classifier. Every answer must pass; a mixed public/private answer is refused rather than narrowed to the public one.
+- The socket is bound to the validated address by a `lookup` that ignores the hostname it is given. The DNS name is kept as `servername` so SNI and certificate verification still apply to the original hostname. A rebind cannot silently replace the approved address because no second resolution happens during connect.
+- TLS is never relaxed: `rejectUnauthorized` is always true, the minimum version is TLS 1.2, and the system trust store is used unless a test injects extra anchors. Do not add a verification bypass.
+- Redirects are never followed by the transport. A 3xx is reported to the caller, and the retrieval path applies its own bounded, revalidated redirect policy.
+- A configured environment proxy is refused. A proxy resolves the destination itself, so the validated-address binding cannot be guaranteed. Proxy support is not implemented and must not be claimed.
+- Connection and response deadlines are separate: the connect deadline covers TCP plus the TLS handshake, and the response deadline starts once the socket is secure.
+- Do not claim DNS-rebinding resistance beyond what the binding test shows: the address is validated and bound per request, and the test suite proves a rebind to a private address is refused.
+
+### Provider pricing and spend control
+
+- `factory/src/generation/pricing.ts` holds a versioned snapshot transcribed from the published pricing page, with a content hash, a retrieval date and explicit caveats. A snapshot that fails its hash or exceeds its maximum age is refused.
+- Model capability and model pricing stay separate: capability manifests say what a model can do, the pricing snapshot says what it costs. An unknown or explicitly unsupported model is refused; a rate is never inferred.
+- A local estimate is an upper bound for the documented tariff. It is never a guarantee of the invoice, and tax, discounts, promotions and other clients on the same account are outside the engine's visibility.
+- `factory/src/generation/ledger.ts` is the only spend authority. A submission requires an open reservation, a job cannot reserve twice, and the check-and-write happens under an exclusive filesystem lock so two processes cannot both consume the last of the budget.
+- A stale lock is never removed silently. It fails closed and needs `generation ledger-unlock --confirm`, which records the intervention in the ledger document.
+- An uncertain submission keeps its reservation exposed; a failed or canceled task never implies zero billing. A known charge is only recorded from operator-supplied evidence and is labelled `user-entered` or `provider-reported`, never presented as verified by MVFoundry.
+- Project-level budget controls do not limit spend incurred by other clients on the same provider account. Never claim otherwise.
+
+### Retry and billable-request safety
+
+- `factory/src/generation/retry.ts` is the single retry decision point. A billable submission is never retried automatically, whatever the error: an uncertain POST may already have created a paid task.
+- Status polling and output retrieval may retry with bounded exponential backoff and up to 50% jitter, honouring a valid `Retry-After`. Authentication, validation, redirect, TLS and address failures are never retried.
+- Another billable submission is only possible after the previous task state has been conclusively reconciled and a separate authorization permits it.
+
+### Atomic media persistence and recovery
+
+- A downloaded provider result is streamed into task-owned scratch space, hashed while streaming, and published only by renaming a file whose size and SHA256 were verified. There is no copy-into-destination fallback.
+- If an atomic rename is impossible, the file is staged and verified inside the destination directory and then renamed. A failure removes every partial artefact and publishes nothing.
+- An existing finalized output is reused only when its hash matches. A different output at the same path is refused unless an explicit replacement was authorized.
+- `generation/state/<jobId>.json` records the finalization phase, and `generation retrieval-state` classifies what a restart finds: no media, incomplete temporary file, downloaded-but-not-finalized, finalized-but-not-manifested, finalized-awaiting-review, or approved. Contradictory evidence is `ambiguous` and fails closed.
+- A failed recovery never creates an approved-looking output, and a download failure never justifies resubmitting a billable generation.
+
+### Operator preflight
+
+- `generation preflight` answers what would be sent, which model and assets would leave the machine, whether disclosure is authorized, the estimated maximum charge, the remaining budget, the submission limit, capability compliance, transport readiness, credential presence (never the value), requirement currency and whether the job is already submitted.
+- A green technical preflight is not authorization. The report always states `liveExecution: NOT_GRANTED` and `submissionAuthorized: false`, and a passing result reads `READY FOR SEPARATELY AUTHORIZED PILOT`, never `LIVE PROVIDER VERIFIED`.
+- Project permission flags (`externalGeneration`, `localOnly`, `allowNetwork`) are reported as a separate policy gate. The engine currently forbids enabling them; opening them is an authorization decision, not a technical prerequisite.
+
+### Publication audit
+
+- `security/audit-publication.mjs` supports two evidence modes: `filesystem` (working tree) and `--candidate` (the exact tracked publication set from `git ls-files`).
+- Untracked local tool directories are skipped and reported in `skippedLocalToolDirs`, never hidden. A directory that contains any tracked file is a finding, not a skip.
+- Secret scanning, absolute-path scanning, unexpected-URL-host scanning, media rejection and the allowlist checks are unchanged by that exclusion.
+- `.workbuddy-ai/` is local agent state: it must never be tracked, staged, committed or included in the publication inventory.
+
 
 ### Timeline and rendering
 

@@ -110,3 +110,16 @@ Defines how generated media may enter a local project. P0 authorizes no provider
 - An expired result URL is recovered by re-querying the existing task. Retrieval failure never justifies a second billable submission.
 - Incompatible media is normalized under the reviewed profile, never by an ad-hoc command. The provider original is kept, both hashes are recorded, and the derived file still needs review.
 - Normalization cannot invent transparency. An opaque image never satisfies a layer requirement.
+
+## Go-live readiness (P1-E-E)
+
+- The live transport is implemented but inert. `LIVE_PROVIDER_EXECUTION` stays `NOT_GRANTED`; `submit-live` always refuses, and no code path enables the transport in this phase.
+- The socket is bound to a validated DNS answer: every answer is screened, one approved address is supplied to the lookup, and the DNS name is kept for SNI and certificate verification. A rebind is refused, not silently followed. TLS is never relaxed.
+- The authorization header is refused for any host outside the API host list, and a configured proxy is refused rather than bypassed.
+- Pricing comes from a versioned snapshot with a content hash and a retrieval date. An unknown, unsupported, tampered or stale price is refused; a rate is never inferred.
+- A submission requires an open budget reservation. A job cannot reserve twice, and the check-and-write is under an exclusive filesystem lock so two processes cannot both spend the last of the budget. A stale lock fails closed and needs an explicit operator unlock.
+- An uncertain submission keeps its reservation exposed. A failed or canceled task never implies zero billing, and a known charge is recorded only from operator-supplied evidence and labelled as such.
+- A billable submission is never retried automatically, whatever the error. Status polling and retrieval may retry with bounded jittered backoff and `Retry-After`; a submission may not.
+- Provider output is published only by renaming a verified file. There is no copy-into-destination fallback, an interrupted download publishes nothing, and a restart classifies the on-disk state instead of guessing.
+- `generation preflight` reports what would be sent, what would leave the machine, the estimate, the remaining budget and the blockers. A green preflight reads `READY FOR SEPARATELY AUTHORIZED PILOT`, never `LIVE PROVIDER VERIFIED`, and is never authorization to submit.
+- Project budget controls do not limit spend incurred by other clients on the same provider account. Never claim otherwise, and never present a local estimate as the final invoice.

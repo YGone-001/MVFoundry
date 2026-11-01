@@ -45,6 +45,17 @@ if (!command || command === '--help' || command === 'help') {
   handoff --project <id> --job <JOB> [--file <project-relative-output>] --rights "<rights>"
   review --project <id> --job <JOB> --decision <approve|reject> --notes "<review>"
   blockers --project <id> --job <JOB>
+  pricing --project <id> [--snapshot <project-relative.json>]
+  estimate --project <id> --job <JOB> [--snapshot <project-relative.json>]
+  ledger --project <id>
+  ledger-ceiling --project <id> --max-spend <usd> --notes "<review>"
+  reserve --project <id> --job <JOB> [--snapshot <project-relative.json>]
+  ledger-reconcile --project <id> --job <JOB> --status <reserved|submitted|reconciled-known|reconciled-unknown|released|canceled> \
+    [--actual-usd N] [--classification <unknown|estimated|user-entered|provider-reported>] [--task-id <ID>] --notes "<review>"
+  ledger-unlock --project <id> --confirm --notes "<why>"
+  preflight --project <id> --job <JOB> [--authorize-disclosure] [--snapshot <project-relative.json>]
+  transport-check --project <id>
+  retrieval-state --project <id> --job <JOB>
   report --project <id>
 
 All commands accept --workspace <external-root> or MV_WORKSPACE_ROOT.
@@ -53,7 +64,9 @@ PRIVATE_REFERENCE_UPLOAD = NOT_GRANTED: reference preparation never transfers by
 Only offline-fixture output produces real media locally; it is marked
 synthetic-offline-test-output and is never described as AI generation.
 Retrieval and normalization commands replay recorded fixtures through injected
-transports and never contact a provider.`);
+transports and never contact a provider.
+Budget controls in a project do not limit spend incurred by other clients on the
+same provider account, and a local estimate is never a guarantee of the invoice.`);
   process.exit(command ? 0 : 2);
 }
 if (!projectId) {
@@ -141,6 +154,26 @@ const {
   NORMALIZATION_PROFILE,
 } = require('../dist/src/media/videoNormalize.js');
 const {sha256File} = require('../dist/src/media/hash.js');
+const {
+  RUNWAY_PRICING_SNAPSHOT,
+  estimateGenerationCost,
+  validatePricingSnapshot,
+  outputLongEdgeForJob,
+  billableSecondsForJob,
+} = require('../dist/src/generation/pricing.js');
+const {
+  readLedger,
+  summarizeLedger,
+  reserveBudget,
+  reconcileLedgerEntry,
+  setProjectCeiling,
+  unlockLedger,
+} = require('../dist/src/generation/ledger.js');
+const {buildPreflight} = require('../dist/src/generation/preflight.js');
+const {readRetrievalState, classifyRecovery} = require('../dist/src/generation/finalization.js');
+const {RUNWAY_ENDPOINT_POLICY, TRANSPORT_POLICY_VERSION} = require('../dist/src/generation/transport.js');
+const {RETRY_POLICY} = require('../dist/src/generation/retry.js');
+const {resolveProviderDuration} = require('../dist/src/generation/providers.js');
 const {GENERATION_SCHEMA_VERSION, RUNWAY_API_VERSION, NORMALIZATION_VERSION} = require('../dist/src/generation/types.js');
 
 const requireRunwayBaseUrl = () => {
@@ -1357,6 +1390,328 @@ const run = () => {
       note: 'A technical PASS is never an approval; the reviewer decision is the only path to a bound asset.',
     }, null, 2));
     return blockers.length === 0 ? 0 : 2;
+  }
+
+  const pricingSnapshot = () => RUNWAY_PRICING_SNAPSHOT;
+  const loadSnapshot = (ctx) => {
+    const snapshotArg = arg('snapshot');
+    if (!snapshotArg) return RUNWAY_PRICING_SNAPSHOT;
+    const file = resolveProjectRelativePath(ctx.project.projectDir, snapshotArg, {engineRoot: repoRoot});
+    return JSON.parse(readFileSync(file, 'utf8'));
+  };
+  const estimateFor = (job, snapshot) => {
+    const model = RUNWAY_CAPABILITIES.models.find((entry) => entry.id === job.model) ?? null;
+    const neededSeconds = (job.output.durationFrames ?? 0) / Math.max(1, job.output.fps);
+    const providerDuration = model ? resolveProviderDuration(model, neededSeconds) : null;
+    return estimateGenerationCost({
+      snapshot,
+      model: job.model,
+      operation: job.operation,
+      outputLongEdge: outputLongEdgeForJob(job),
+      billableSeconds: billableSecondsForJob(job, providerDuration),
+      referenceCount: job.inputAssets.length,
+      now: new Date(),
+    });
+  };
+  const requireJob = (ctx, jobId) => {
+    const job = jobsOrEmpty(ctx.project).find((entry) => entry.jobId === jobId);
+    if (!job) fail(`Unknown job ${jobId}`);
+    return job;
+  };
+  const intakeReviewFor = (ctx, requirementId) => {
+    const raw = readOptionalProjectJson(ctx.project.projectDir, PREPRODUCTION_PATHS.assetIntake);
+    if (!raw) return null;
+    const record = (raw.records ?? []).find((entry) => entry.requirementId === requirementId);
+    return record ? record.review : null;
+  };
+  const transportStatus = () => ({
+    policyVersion: TRANSPORT_POLICY_VERSION,
+    provider: RUNWAY_ENDPOINT_POLICY.provider,
+    apiHost: RUNWAY_ENDPOINT_POLICY.apiHost,
+    deliveryHosts: RUNWAY_ENDPOINT_POLICY.deliveryHosts,
+    implemented: true,
+    gateOpen: false,
+    proxyPolicy: 'refuse-if-configured',
+    dnsBinding: 'the validated address is supplied to the socket lookup; the DNS name is kept for SNI and certificate verification',
+    redirects: 'not followed by the transport',
+    authorizationHeader: 'api host only; never sent to a delivery host',
+    tls: 'system trust store, hostname verification, TLS >= 1.2, rejectUnauthorized never disabled',
+    retryPolicy: RETRY_POLICY,
+    reason: 'LIVE_PROVIDER_EXECUTION = NOT_GRANTED',
+  });
+
+  if (command === 'pricing') {
+    const ctx = loadContext();
+    const snapshot = loadSnapshot(ctx);
+    const validation = validatePricingSnapshot({snapshot, now: new Date()});
+    console.log(JSON.stringify({
+      projectId,
+      provider: snapshot.provider,
+      pricingVersion: snapshot.pricingVersion,
+      snapshotSha256: snapshot.snapshotSha256,
+      sourceUrl: snapshot.sourceUrl,
+      retrievedAt: snapshot.retrievedAt,
+      creditToUsd: snapshot.creditToUsd,
+      rounding: snapshot.rounding,
+      taxNote: snapshot.taxNote,
+      integrity: {ok: validation.ok, code: validation.code, message: validation.message},
+      models: snapshot.models,
+      unsupported: snapshot.unsupported,
+      caveats: snapshot.caveats,
+      note: 'Transcribed from the published pricing page; no live pricing API was queried.',
+    }, null, 2));
+    return validation.ok ? 0 : 2;
+  }
+
+  if (command === 'estimate') {
+    const jobId = arg('job');
+    if (!jobId) fail('--job is required');
+    const ctx = loadContext();
+    const job = requireJob(ctx, jobId);
+    const decision = estimateFor(job, loadSnapshot(ctx));
+    console.log(JSON.stringify({
+      projectId,
+      jobId,
+      provider: job.provider,
+      model: job.model,
+      operation: job.operation,
+      ok: decision.ok,
+      code: decision.code,
+      message: decision.message,
+      estimate: decision.estimate,
+      note: 'A local estimate is an upper bound for the documented tariff, not a guarantee of the invoice.',
+    }, null, 2));
+    return decision.ok ? 0 : 2;
+  }
+
+  if (command === 'ledger') {
+    const ctx = loadContext();
+    const document = readLedger(ctx.project);
+    const summary = summarizeLedger(document);
+    console.log(JSON.stringify({
+      projectId,
+      summary,
+      entries: document.entries,
+      interventions: document.interventions ?? [],
+      note: 'Budget controls in this project do not limit spend incurred by other clients on the same provider account.',
+    }, null, 2));
+    return 0;
+  }
+
+  if (command === 'ledger-ceiling') {
+    const notes = arg('notes');
+    if (!notes) fail('--notes is required: record why the project ceiling is being set');
+    const raw = arg('max-spend');
+    if (raw === undefined) fail('--max-spend is required (a number, or "none" to clear the ceiling)');
+    const ceiling = raw === 'none' ? null : Number(raw);
+    if (ceiling !== null && (!Number.isFinite(ceiling) || ceiling < 0)) {
+      fail('--max-spend must be a non-negative number or "none"');
+    }
+    const ctx = loadContext();
+    return setProjectCeiling({project: ctx.project, ceilingUsd: ceiling, note: notes}).then((document) => {
+      console.log(JSON.stringify({
+        projectId,
+        projectCeilingUsd: document.projectCeilingUsd,
+        summary: summarizeLedger(document),
+      }, null, 2));
+      return 0;
+    });
+  }
+
+  if (command === 'reserve') {
+    const jobId = arg('job');
+    if (!jobId) fail('--job is required');
+    const ctx = loadContext();
+    const job = requireJob(ctx, jobId);
+    const record = readPermissionDocument(ctx.project).find((entry) => entry.jobId === jobId) ?? null;
+    if (!record) fail(`No permission record exists for job ${jobId}; authorize the request first`);
+    const decision = estimateFor(job, loadSnapshot(ctx));
+    if (!decision.ok) fail(`Cannot reserve without a supported cost estimate: ${decision.code} ${decision.message}`);
+    return reserveBudget({
+      project: ctx.project,
+      job,
+      estimate: {
+        estimatedUsd: decision.estimate.estimatedUsd,
+        estimatedCredits: decision.estimate.estimatedCredits,
+        pricingVersion: decision.estimate.pricingVersion,
+        snapshotSha256: decision.estimate.snapshotSha256,
+      },
+      authorization: {
+        authorizedMaxUsd: record.maxSpendUsd,
+        authorizedMaxCredits: record.maxCredits,
+        authorizationRevision: record.authorizationRevision,
+      },
+    }).then((result) => {
+      console.log(JSON.stringify({
+        projectId,
+        jobId,
+        reserved: true,
+        entry: result.entry,
+        summary: result.summary,
+        note: 'A reservation is not a submission. Live execution remains NOT_GRANTED.',
+      }, null, 2));
+      return 0;
+    });
+  }
+
+  if (command === 'ledger-reconcile') {
+    const jobId = arg('job');
+    if (!jobId) fail('--job is required');
+    const status = arg('status');
+    const allowed = ['reserved', 'submitted', 'reconciled-known', 'reconciled-unknown', 'released', 'canceled'];
+    if (!allowed.includes(status)) fail(`--status must be one of ${allowed.join(', ')}`);
+    const notes = arg('notes');
+    if (!notes) fail('--notes is required: record the evidence behind this reconciliation');
+    const actualRaw = arg('actual-usd');
+    const actualUsd = actualRaw === undefined ? null : Number(actualRaw);
+    if (actualRaw !== undefined && (!Number.isFinite(actualUsd) || actualUsd < 0)) {
+      fail('--actual-usd must be a non-negative number');
+    }
+    const classification = arg('classification', 'user-entered');
+    const allowedClassification = ['unknown', 'estimated', 'user-entered', 'provider-reported'];
+    if (!allowedClassification.includes(classification)) {
+      fail(`--classification must be one of ${allowedClassification.join(', ')}`);
+    }
+    const ctx = loadContext();
+    return reconcileLedgerEntry({
+      project: ctx.project,
+      jobId,
+      status,
+      actualUsd,
+      actualClassification: classification,
+      providerTaskId: arg('task-id'),
+      note: notes,
+    }).then((entry) => {
+      console.log(JSON.stringify({
+        projectId,
+        jobId,
+        entry,
+        summary: summarizeLedger(readLedger(ctx.project)),
+        note: classification === 'provider-reported'
+          ? 'Recorded as provider-reported evidence supplied by the operator.'
+          : 'Recorded as operator-supplied evidence; MVFoundry did not verify it against the provider.',
+      }, null, 2));
+      return 0;
+    });
+  }
+
+  if (command === 'ledger-unlock') {
+    if (!hasFlag('confirm')) fail('--confirm is required: a stale lock needs explicit operator intervention');
+    const notes = arg('notes');
+    if (!notes) fail('--notes is required: record why the lock is being removed');
+    const ctx = loadContext();
+    const result = unlockLedger(ctx.project, notes);
+    console.log(JSON.stringify({projectId, ...result, note: 'The intervention is recorded in the ledger document.'}, null, 2));
+    return 0;
+  }
+
+  if (command === 'transport-check') {
+    console.log(JSON.stringify({projectId, ...transportStatus(), note: 'No network request is made by this command.'}, null, 2));
+    return 0;
+  }
+
+  if (command === 'retrieval-state') {
+    const jobId = arg('job');
+    if (!jobId) fail('--job is required');
+    const ctx = loadContext();
+    const job = requireJob(ctx, jobId);
+    const state = readRetrievalState(ctx.project, jobId);
+    const resolveInside = (relative) => (relative ? path.resolve(ctx.project.projectDir, relative) : null);
+    const tempAbsolute = resolveInside(state?.tempPath ?? null);
+    const targetAbsolute = resolveInside(state?.targetPath ?? null);
+    const tempExists = Boolean(tempAbsolute && existsSync(tempAbsolute));
+    const targetExists = Boolean(targetAbsolute && existsSync(targetAbsolute));
+    const manifestExists = existsSync(path.join(ctx.project.projectDir, GENERATION_PATHS.manifests, `${jobId}.json`));
+    const classification = classifyRecovery({
+      state,
+      tempExists,
+      tempBytes: tempExists ? statSync(tempAbsolute).size : 0,
+      targetExists,
+      targetSha256: targetExists ? sha256File(targetAbsolute) : null,
+      manifestExists,
+      intakeReview: intakeReviewFor(ctx, job.requirementId),
+    });
+    console.log(JSON.stringify({
+      projectId,
+      jobId,
+      state,
+      facts: {tempExists, targetExists, manifestExists},
+      classification,
+      note: 'An ambiguous classification fails closed and needs operator review; nothing is auto-approved.',
+    }, null, 2));
+    return classification === 'ambiguous' ? 2 : 0;
+  }
+
+  if (command === 'preflight') {
+    const jobId = arg('job');
+    if (!jobId) fail('--job is required');
+    const ctx = loadContext();
+    const job = requireJob(ctx, jobId);
+    const requirement = ctx.storyboard.assetRequirements.find((entry) => entry.id === job.requirementId) ?? null;
+    const record = readPermissionDocument(ctx.project).find((entry) => entry.jobId === jobId) ?? null;
+    const provider = job.provider === 'runway'
+      ? createRunwayProvider({
+          transport: createDenyingTransport(),
+          apiKey: process.env.RUNWAY_API_KEY ?? null,
+          baseUrl: requireRunwayBaseUrl(),
+        })
+      : createOfflineProvider({outputRoot: path.join(ctx.project.projectDir, GENERATION_PATHS.outputs), jobId});
+    const model = provider.capabilities.models.find((entry) => entry.id === job.model) ?? null;
+    const disclosure = hasFlag('authorize-disclosure') ? 'authorized-for-simulation' : 'not-authorized';
+    const references = job.inputAssets.map((asset) => {
+      try {
+        const prepared = prepareReferenceInput({
+          project: ctx.project,
+          assetId: asset.assetId,
+          expectedSha256: asset.sha256,
+          provider: job.provider,
+          model: job.model,
+          maxReferences: model ? model.maxReferences : 0,
+          disclosure,
+          engineRoot: repoRoot,
+        });
+        return {assetId: prepared.assetId, disclosure: prepared.disclosure, bytes: prepared.bytes, blockers: prepared.blockers};
+      } catch (error) {
+        return {
+          assetId: asset.assetId,
+          disclosure,
+          bytes: null,
+          blockers: [error instanceof Error ? error.message : String(error)],
+        };
+      }
+    });
+    const request = buildProviderRequest({
+      job,
+      references: job.inputAssets.map((asset) => ({assetId: asset.assetId, path: asset.assetId, sha256: asset.sha256})),
+    });
+    const transport = transportStatus();
+    const report = buildPreflight({
+      project: ctx.project,
+      job,
+      requirement,
+      permissionRecord: record,
+      ledger: readLedger(ctx.project),
+      pricing: loadSnapshot(ctx),
+      estimate: estimateFor(job, loadSnapshot(ctx)),
+      capabilityViolations: provider.validate(request),
+      references,
+      intakeReview: intakeReviewFor(ctx, job.requirementId),
+      storyboard: {revision: ctx.storyboard.revision, status: ctx.storyboard.status, renderReady: ctx.storyboard.renderReady},
+      credentialsPresent: Boolean(process.env.RUNWAY_API_KEY),
+      liveExecutionEnabled: false,
+      transport: {
+        ready: transport.implemented,
+        reason: transport.gateOpen ? 'live transport gate is open' : transport.reason,
+        gateOpen: transport.gateOpen,
+      },
+      now: new Date(),
+    });
+    console.log(JSON.stringify({
+      ...report,
+      transportPolicy: transport,
+      note: 'A green technical preflight is not authorization to submit. Live execution remains NOT_GRANTED.',
+    }, null, 2));
+    return report.readiness === 'READY FOR SEPARATELY AUTHORIZED PILOT' ? 0 : 2;
   }
 
   if (command === 'report') {
