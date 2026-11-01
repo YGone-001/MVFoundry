@@ -25,8 +25,23 @@ const arg = (name, fallback) => {
   const index = args.indexOf(`--${name}`);
   return index >= 0 ? args[index + 1] : fallback;
 };
-const workspaceRoot = path.resolve(arg('workspace', process.env.MV_WORKSPACE_ROOT ?? path.join(repoRoot, '.tmp', 'mv-project-b')));
+
+const fail = (message) => {
+  console.error(message);
+  process.exit(2);
+};
+
+// The profile is selected exactly once here and forwarded to every production
+// subprocess through the single `produce()` wrapper below. A repeated flag is a
+// contradiction, not a last-one-wins preference.
+const profileFlagCount = args.filter((value) => value === '--profile').length;
+if (profileFlagCount > 1) fail('--profile may be given at most once');
 const profile = arg('profile', 'master');
+if (!['master', 'ci'].includes(profile)) fail(`--profile must be master or ci, not ${profile}`);
+const PROFILE_ARGS = ['--profile', profile];
+const EVIDENCE_NAME = profile === 'ci' ? 'production-evidence-ci.json' : 'production-evidence.json';
+
+const workspaceRoot = path.resolve(arg('workspace', process.env.MV_WORKSPACE_ROOT ?? path.join(repoRoot, '.tmp', 'mv-project-b')));
 const PROJECT_ID = 'prism-transit-demo';
 const projectDir = path.join(workspaceRoot, PROJECT_ID);
 
@@ -97,11 +112,16 @@ const gen = (cliArgs, allowFailure = true) =>
   run('generation.mjs', [...cliArgs, '--project', PROJECT_ID], {allowFailure});
 
 const produce = (extra = [], allowFailure = false) => {
+  // Every production subprocess inherits the profile selected for this run.
+  // Callers may add options, never a second profile.
+  if (extra.includes('--profile')) {
+    fail('produce() forwards --profile centrally; a caller must not pass it again');
+  }
   // produce-mv.mjs uses stdio: 'inherit' for the render, so it must NOT be run
   // through execFileSync pipe capture (which deadlocks on the inherited pipe).
   const result = spawnSync(process.execPath, [
     path.join(repoRoot, 'factory', 'scripts', 'produce-mv.mjs'),
-    '--project', PROJECT_ID, '--workspace', workspaceRoot, ...extra,
+    '--project', PROJECT_ID, '--workspace', workspaceRoot, ...PROFILE_ARGS, ...extra,
   ], {
     encoding: 'utf8',
     maxBuffer: 256 * 1024 * 1024,
@@ -326,19 +346,34 @@ record('D1: the generic production command completes without knowing the project
   produced.exit === 0 && produced.body?.status !== 'BLOCKED',
   {exit: produced.exit, output: produced.body?.output?.path});
 
-const evidencePath = path.join(projectDir, 'reports', profile === 'ci' ? 'production-evidence-ci.json' : 'production-evidence.json');
-const evidence = existsSync(evidencePath) ? readJson(evidencePath) : null;
-record('D2: production evidence records the real output and all asset hashes',
-  evidence && evidence.output?.video?.frames === plan.profile.durationInFrames &&
-    evidence.assets.length === requirements.length,
-  {frames: evidence?.output?.video?.frames, assets: evidence?.assets?.length});
-
-const masterRelative = evidence?.output?.path;
-const masterAbsolute = masterRelative ? path.join(projectDir, masterRelative) : null;
-
 // ---------------------------------------------------------------------------
-// E. Decoded verification
+// D/E. Produced-artifact acceptance, fail closed
+//
+// Every mandatory decoded check is emitted exactly once, whether or not the
+// artifact exists. A missing artifact must never shrink the check list, because
+// a shorter list still exits zero and would report a green run that never
+// decoded anything.
 // ---------------------------------------------------------------------------
+
+const DECODED_CHECKS = {
+  e1: 'E1: every shot boundary is a visible cut and in-shot motion is smaller',
+  e2: 'E2: the first and last frames carry visible content',
+  e3: 'E3: the master carries exactly one audio stream at the expected duration',
+  e4: 'E4: the soundtrack section energy matches the composition (surge > threshold > settle tail)',
+  e5: 'E5: the tempo change is audible in the decoded soundtrack (more hits per second at 120 BPM)',
+};
+
+/** Output dimensions the selected profile must produce. Mirrors produce-mv.mjs. */
+const profileDimensions = () =>
+  profile === 'ci'
+    ? {
+        width: Math.round((plan.profile.width * 0.5) / 2) * 2,
+        height: Math.round((plan.profile.height * 0.5) / 2) * 2,
+      }
+    : {width: plan.profile.width, height: plan.profile.height};
+
+/** The output filename produce-mv.mjs uses when the verifier passes no --out. */
+const expectedOutputName = () => `renders/${PROJECT_ID}-${profile === 'ci' ? 'ci-' : ''}master.mp4`;
 
 const frameRgb = (file, frameNumber, width = 64, height = 48) => {
   const raw = execFileSync('ffmpeg', [
@@ -372,76 +407,193 @@ const gridSignature = (bytes, width = 64, height = 48) => {
 
 const sigDistance = (a, b) => Number(Math.max(...a.map((v, i) => Math.abs(v - b[i]))).toFixed(2));
 
-if (masterAbsolute && existsSync(masterAbsolute)) {
-  const cutFrames = shots.slice(1).map((shot) => shot.startFrame);
-  const cutDistances = cutFrames.map((frame) =>
-    sigDistance(gridSignature(frameRgb(masterAbsolute, frame - 1)), gridSignature(frameRgb(masterAbsolute, frame))));
-  const intraDistances = shots.map((shot) => {
-    const mid = shot.startFrame + Math.floor((shot.endFrame - shot.startFrame) / 2);
-    return sigDistance(gridSignature(frameRgb(masterAbsolute, mid - 2)), gridSignature(frameRgb(masterAbsolute, mid + 2)));
-  });
-  record('E1: every shot boundary is a visible cut and in-shot motion is smaller',
-    cutDistances.every((d) => d > 8) && Math.max(...intraDistances) < Math.min(...cutDistances),
-    {minCut: Math.min(...cutDistances), maxIntra: Math.max(...intraDistances), cuts: cutDistances.length});
+const probeMedia = (file) => {
+  try {
+    const probe = JSON.parse(execFileSync('ffprobe', [
+      '-v', 'error', '-print_format', 'json', '-show_streams', '-show_format', file,
+    ], {encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true}));
+    const streams = probe.streams ?? [];
+    return {
+      video: streams.find((stream) => stream.codec_type === 'video') ?? null,
+      audioStreams: streams.filter((stream) => stream.codec_type === 'audio'),
+      duration: probe.format?.duration ?? null,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      video: null,
+      audioStreams: [],
+      duration: null,
+      error: `ffprobe could not read the produced file: ${String(error?.message ?? error).slice(0, 160)}`,
+    };
+  }
+};
 
-  // First and last frames are not black.
-  const firstSig = gridSignature(frameRgb(masterAbsolute, 0));
-  const lastSig = gridSignature(frameRgb(masterAbsolute, plan.profile.durationInFrames - 1));
-  record('E2: the first and last frames carry visible content',
-    firstSig.some((v) => v > 8) && lastSig.some((v) => v > 8),
-    {first: firstSig.slice(0, 4), last: lastSig.slice(0, 4)});
-
-  // Audio: decode and check duration and energy.
-  const audioInfo = execFileSync('ffprobe', [
-    '-v', 'error', '-print_format', 'json', '-show_streams', '-select_streams', 'a', masterAbsolute,
-  ], {encoding: 'utf8', windowsHide: true});
-  const audioStream = JSON.parse(audioInfo).streams?.[0];
-  record('E3: the master carries exactly one audio stream at the expected duration',
-    audioStream && audioStream.codec_name === 'aac' &&
-      Math.abs(Number(audioStream.duration) - 50) < 0.3,
-    {codec: audioStream?.codec_name, duration: audioStream?.duration});
-
-  // Section energy profile: surge section is louder than threshold.
-  const mono = execFileSync('ffmpeg', [
-    '-v', 'error', '-i', masterAbsolute,
-    '-ac', '1', '-ar', '8000', '-f', 's16le', '-',
-  ], {encoding: null, maxBuffer: 64 * 1024 * 1024, windowsHide: true});
-  const samples = new Int16Array(mono.buffer, mono.byteOffset, mono.length / 2);
-  const rms = (startSec, endSec) => {
-    const s = Math.round(startSec * 8000);
-    const e = Math.round(endSec * 8000);
-    let sum = 0;
-    for (let i = s; i < e && i < samples.length; i++) sum += samples[i] * samples[i];
-    return Math.sqrt(sum / (e - s));
+/**
+ * Evaluates one project directory's produced artifact. The directory is a
+ * parameter so the same code can prove its own fail-closed behaviour against a
+ * directory that holds no production evidence.
+ */
+const evaluateProducedProject = ({dir, record: emit}) => {
+  const seen = new Set();
+  const emitOnce = (check, pass, details = {}) => {
+    seen.add(check);
+    emit(check, Boolean(pass), details);
   };
-  const threshold = rms(1, 8);
-  const surge = rms(35, 44);
-  const settle = rms(48, 49.5);
-  record('E4: the soundtrack section energy matches the composition (surge > threshold > settle tail)',
-    surge > threshold && threshold > settle * 0.5,
-    {threshold: Number(threshold.toFixed(1)), surge: Number(surge.toFixed(1)), settle: Number(settle.toFixed(1))});
 
-  // The 5/4 tempo change is real: section 2 (120 BPM) has more hits per second
-  // than section 1 (100 BPM) in 5/4.
-  const hitsIn = (startSec, endSec) => {
-    // Count transient peaks above a threshold.
-    const s = Math.round(startSec * 8000);
-    const e = Math.round(endSec * 8000);
-    let count = 0;
-    let above = false;
-    for (let i = s; i < e && i < samples.length; i++) {
-      const loud = Math.abs(samples[i]) > 4000;
-      if (loud && !above) count++;
-      above = loud;
+  const dims = profileDimensions();
+  const outputName = expectedOutputName();
+  const evidencePath = path.join(dir, 'reports', EVIDENCE_NAME);
+  const evidence = existsSync(evidencePath) ? readJson(evidencePath) : null;
+
+  emitOnce('D2: production evidence records the real output and all asset hashes',
+    Boolean(evidence) &&
+      evidence.output?.video?.frames === plan.profile.durationInFrames &&
+      (evidence.assets ?? []).length === requirements.length,
+    evidence
+      ? {
+          frames: evidence.output?.video?.frames,
+          assets: (evidence.assets ?? []).length,
+          evidence: `reports/${EVIDENCE_NAME}`,
+        }
+      : {
+          evidence: `reports/${EVIDENCE_NAME}`,
+          reason: `reports/${EVIDENCE_NAME} is missing, so no produced artifact can be accepted`,
+        });
+
+  const mediaRelative = evidence?.output?.path ?? null;
+  const mediaAbsolute = mediaRelative ? path.join(dir, mediaRelative) : null;
+  const mediaPresent = Boolean(mediaAbsolute && existsSync(mediaAbsolute));
+
+  emitOnce('D3: the evidence belongs to the selected profile and names that profile output',
+    Boolean(evidence) &&
+      evidence.profile === profile &&
+      mediaRelative === outputName &&
+      evidence.expectations?.width === dims.width &&
+      evidence.expectations?.height === dims.height &&
+      evidence.expectations?.frames === plan.profile.durationInFrames &&
+      evidence.expectations?.fps === plan.profile.fps,
+    evidence
+      ? {
+          profile: evidence.profile,
+          output: mediaRelative,
+          expectedOutput: outputName,
+          expectations: evidence.expectations,
+        }
+      : {reason: 'there is no production evidence to attribute to a profile'});
+
+  const media = mediaPresent ? probeMedia(mediaAbsolute) : null;
+  const mediaReason = mediaPresent
+    ? media?.error ?? null
+    : `the produced file named by reports/${EVIDENCE_NAME} is missing`;
+
+  emitOnce('D4: the produced file matches the selected profile exactly',
+    Boolean(media) &&
+      !media.error &&
+      media.video?.codec_name === 'h264' &&
+      media.video?.pix_fmt === 'yuv420p' &&
+      media.video?.width === dims.width &&
+      media.video?.height === dims.height &&
+      media.video?.r_frame_rate === `${plan.profile.fps}/1` &&
+      Number(media.video?.nb_frames) === plan.profile.durationInFrames &&
+      Math.abs(Number(media.duration) - plan.profile.durationInFrames / plan.profile.fps) <= 0.15,
+    media
+      ? {
+          codec: media.video?.codec_name,
+          pixelFormat: media.video?.pix_fmt,
+          width: media.video?.width,
+          height: media.video?.height,
+          frameRate: media.video?.r_frame_rate,
+          frames: Number(media.video?.nb_frames),
+          duration: media.duration,
+          expected: {...dims, fps: plan.profile.fps, frames: plan.profile.durationInFrames},
+          error: media.error,
+        }
+      : {reason: mediaReason});
+
+  if (!media || media.error) {
+    for (const check of Object.values(DECODED_CHECKS)) {
+      emitOnce(check, false, {reason: mediaReason});
     }
-    return count;
-  };
-  const hitsSlow = hitsIn(1, 8);   // 100 BPM 5/4: ~11.7 beats
-  const hitsFast = hitsIn(10, 20); // 120 BPM 5/4: ~20 beats
-  record('E5: the tempo change is audible in the decoded soundtrack (more hits per second at 120 BPM)',
-    hitsFast > hitsSlow,
-    {hitsAt100Bpm: hitsSlow, hitsAt120Bpm: hitsFast});
-}
+    return {evidence, mediaAbsolute, mediaPresent};
+  }
+
+  try {
+    const cutFrames = shots.slice(1).map((shot) => shot.startFrame);
+    const cutDistances = cutFrames.map((frame) =>
+      sigDistance(gridSignature(frameRgb(mediaAbsolute, frame - 1)), gridSignature(frameRgb(mediaAbsolute, frame))));
+    const intraDistances = shots.map((shot) => {
+      const mid = shot.startFrame + Math.floor((shot.endFrame - shot.startFrame) / 2);
+      return sigDistance(gridSignature(frameRgb(mediaAbsolute, mid - 2)), gridSignature(frameRgb(mediaAbsolute, mid + 2)));
+    });
+    emitOnce(DECODED_CHECKS.e1,
+      cutDistances.length === shots.length - 1 &&
+        cutDistances.every((d) => d > 8) &&
+        Math.max(...intraDistances) < Math.min(...cutDistances),
+      {minCut: Math.min(...cutDistances), maxIntra: Math.max(...intraDistances), cuts: cutDistances.length});
+
+    const firstSig = gridSignature(frameRgb(mediaAbsolute, 0));
+    const lastSig = gridSignature(frameRgb(mediaAbsolute, plan.profile.durationInFrames - 1));
+    emitOnce(DECODED_CHECKS.e2,
+      firstSig.some((v) => v > 8) && lastSig.some((v) => v > 8),
+      {first: firstSig.slice(0, 4), last: lastSig.slice(0, 4)});
+
+    const audioStreams = media.audioStreams;
+    const audioStream = audioStreams[0];
+    const audioDuration = Number(audioStream?.duration ?? media.duration);
+    emitOnce(DECODED_CHECKS.e3,
+      audioStreams.length === 1 && audioStream?.codec_name === 'aac' && Math.abs(audioDuration - 50) < 0.3,
+      {streams: audioStreams.length, codec: audioStream?.codec_name, duration: audioDuration});
+
+    const mono = execFileSync('ffmpeg', [
+      '-v', 'error', '-i', mediaAbsolute,
+      '-ac', '1', '-ar', '8000', '-f', 's16le', '-',
+    ], {encoding: null, maxBuffer: 64 * 1024 * 1024, windowsHide: true});
+    const samples = new Int16Array(mono.buffer, mono.byteOffset, mono.length / 2);
+    const rms = (startSec, endSec) => {
+      const s = Math.round(startSec * 8000);
+      const e = Math.round(endSec * 8000);
+      let sum = 0;
+      for (let i = s; i < e && i < samples.length; i++) sum += samples[i] * samples[i];
+      return Math.sqrt(sum / (e - s));
+    };
+    const threshold = rms(1, 8);
+    const surge = rms(35, 44);
+    const settle = rms(48, 49.5);
+    emitOnce(DECODED_CHECKS.e4,
+      surge > threshold && threshold > settle * 0.5,
+      {threshold: Number(threshold.toFixed(1)), surge: Number(surge.toFixed(1)), settle: Number(settle.toFixed(1))});
+
+    // The 5/4 tempo change is real: section 2 (120 BPM) has more hits per second
+    // than section 1 (100 BPM) in 5/4.
+    const hitsIn = (startSec, endSec) => {
+      const s = Math.round(startSec * 8000);
+      const e = Math.round(endSec * 8000);
+      let count = 0;
+      let above = false;
+      for (let i = s; i < e && i < samples.length; i++) {
+        const loud = Math.abs(samples[i]) > 4000;
+        if (loud && !above) count++;
+        above = loud;
+      }
+      return count;
+    };
+    const hitsSlow = hitsIn(1, 8);   // 100 BPM 5/4: ~11.7 beats
+    const hitsFast = hitsIn(10, 20); // 120 BPM 5/4: ~20 beats
+    emitOnce(DECODED_CHECKS.e5,
+      hitsFast > hitsSlow,
+      {hitsAt100Bpm: hitsSlow, hitsAt120Bpm: hitsFast});
+  } catch (error) {
+    const reason = `decoded acceptance could not run: ${String(error?.message ?? error).slice(0, 200)}`;
+    for (const check of Object.values(DECODED_CHECKS)) {
+      if (!seen.has(check)) emitOnce(check, false, {reason});
+    }
+  }
+
+  return {evidence, mediaAbsolute, mediaPresent};
+};
+
+evaluateProducedProject({dir: projectDir, record});
 
 // ---------------------------------------------------------------------------
 // F. Idempotency and overwrite protection
@@ -549,6 +701,69 @@ negative('G7: an unsupported audio format is refused', () => {
   ], {allowFailure: true, workspace: cloneRoot});
   return result.exit !== 0;
 });
+
+// G8 — a green verdict must be impossible when the artifact required for decoded
+// acceptance is absent. This runs the real D2/D3/D4/E1-E5 evaluation against a
+// directory that holds no production evidence, and requires all eight to fail.
+{
+  const probeRoot = path.join(workspaceRoot, 'pt-missing-evidence');
+  rmSync(probeRoot, {recursive: true, force: true});
+  mkdirSync(path.join(probeRoot, 'reports'), {recursive: true});
+  const probe = [];
+  evaluateProducedProject({
+    dir: probeRoot,
+    record: (check, pass, details = {}) => probe.push({check, pass: Boolean(pass), details}),
+  });
+  rmSync(probeRoot, {recursive: true, force: true});
+
+  const mandatory = ['D2:', 'D3:', 'D4:', 'E1:', 'E2:', 'E3:', 'E4:', 'E5:'];
+  const covered = mandatory.every((prefix) => probe.some((entry) => entry.check.startsWith(prefix)));
+  record('G8: missing production evidence fails every mandatory decoded check',
+    covered && probe.length === mandatory.length && probe.every((entry) => entry.pass === false),
+    {recorded: probe.map((entry) => `${entry.check.split(':')[0]}=${entry.pass ? 'pass' : 'fail'}`)});
+}
+
+// G9 — evidence that belongs to the other profile cannot be accepted for this
+// one. This is the exact shape of the original remote defect: the artifact and
+// the evidence existed, but under the master profile while the run asked for CI.
+{
+  const probeRoot = path.join(workspaceRoot, 'pt-foreign-profile');
+  rmSync(probeRoot, {recursive: true, force: true});
+  mkdirSync(path.join(probeRoot, 'reports'), {recursive: true});
+  const otherProfile = profile === 'ci' ? 'master' : 'ci';
+  const otherOutput = `renders/${PROJECT_ID}-${otherProfile === 'ci' ? 'ci-' : ''}master.mp4`;
+  writeFileSync(
+    path.join(probeRoot, 'reports', EVIDENCE_NAME),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      projectId: PROJECT_ID,
+      profile: otherProfile,
+      output: {path: otherOutput, video: {frames: plan.profile.durationInFrames}},
+      assets: requirements.map((requirement) => ({requirementId: requirement.id})),
+      expectations: profileDimensions(),
+    }, null, 2)}\n`,
+  );
+  const probe = [];
+  evaluateProducedProject({
+    dir: probeRoot,
+    record: (check, pass, details = {}) => probe.push({check, pass: Boolean(pass), details}),
+  });
+  rmSync(probeRoot, {recursive: true, force: true});
+
+  const byName = (prefix) => probe.find((entry) => entry.check.startsWith(`${prefix}:`));
+  record('G9: evidence attributed to another profile is rejected, never accepted by substitution',
+    byName('D2')?.pass === true &&
+      byName('D3')?.pass === false &&
+      byName('D4')?.pass === false &&
+      byName('E1')?.pass === false &&
+      byName('E5')?.pass === false,
+    {
+      otherProfile,
+      evidenceName: EVIDENCE_NAME,
+      offendingProfile: byName('D3')?.details?.profile,
+      recorded: probe.map((entry) => `${entry.check.split(':')[0]}=${entry.pass ? 'pass' : 'fail'}`),
+    });
+}
 
 // ---------------------------------------------------------------------------
 // H. Source preservation
