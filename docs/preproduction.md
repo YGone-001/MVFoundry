@@ -385,3 +385,7 @@ Eleven requirements are fulfilled through the accepted handoff workflow: two by 
 - Generated plans use built-in Canvas renderer families by default. Video/Hybrid media planning requires additional typed media configuration and approved local assets.
 - No image/video generation, provider adapter, upload or real-song migration is implemented.
 - All generated plans, media and previews stay external and are not committed.
+
+## Operator iteration
+
+See [operator workflow](operator-workflow.md) for targeted draft edits, explicit promotion, preview-bound feedback and stale review behavior. Approved history remains immutable; a single-shot timing edit that creates a gap or overlap is refused.

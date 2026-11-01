@@ -7,6 +7,8 @@
     "node": ">=20"
   },
   "scripts": {
+    "mv:workflow": "npm run build && node factory/scripts/mv-workflow.mjs",
+    "workflow:verify": "npm run build && node factory/scripts/verify-mv-workflow.mjs",
     "typecheck": "tsc -p factory/tsconfig.json --noEmit",
     "build": "tsc -p factory/tsconfig.json",
     "fixtures": "node factory/scripts/generate-fixtures.mjs",

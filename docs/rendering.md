@@ -284,3 +284,9 @@ After FFmpeg exits, `produce-mv.mjs` re-probes the file and refuses to call it c
 ### Retry and recovery
 
 `--retry N` re-runs the render on failure. A retry is safe because it only rebuilds engine-owned cache: the approved sources, the bound assets and `project.json` are never written by the producer. A failed local render consumes no pilot admission and no provider budget, and it never triggers a new generation job.
+
+## Shot previews and render diagnostics
+
+The mv:workflow preview-shot command renders only the selected half-open interval through render-project, including its authoritative PCM mix slice. It verifies actual decoded video and audio before recording preview evidence. Existing outputs are refused. See [operator workflow](operator-workflow.md).
+
+The producer records bounded render-attempt diagnostics (exit, signal, stderr, failure category, output state and source-hash preservation). A failed attempt never writes fresh success evidence. A stale existing master requires an explicit rerender or a new output filename. Idempotency also checks the actual output hash and workflow content binding.

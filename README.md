@@ -6,6 +6,8 @@ A local-first, agent-driven framework for building music videos with Remotion. I
 
 ## 1. Project overview
 
+For local creative iteration, use `npm run mv:workflow -- help`. Inspect shots, create a targeted draft, preview only the affected range with its soundtrack interval, record feedback and compare revisions. See [the operator workflow](docs/operator-workflow.md).
+
 MVFoundry provides:
 
 - a validated per-project configuration contract;

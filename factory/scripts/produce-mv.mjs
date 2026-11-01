@@ -21,12 +21,13 @@
 //
 // Nothing here contacts a provider, spends credits or writes project.json.
 
-import {execFileSync} from 'node:child_process';
+import {execFileSync, spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {existsSync, readFileSync, statSync, writeFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {openWorkflow, selection, binding} from './support/workflow-state.mjs';
 
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -54,10 +55,14 @@ if (!['master', 'ci'].includes(profile)) {
   console.error('--profile must be master or ci');
   process.exit(2);
 }
+if (!Number.isInteger(retries) || retries < 1 || retries > 5) {
+  console.error('--retry must be an integer from 1 to 5');
+  process.exit(2);
+}
 
 const {loadProject} = require('../dist/src/project/loadProject.js');
 const {sha256File} = require('../dist/src/media/hash.js');
-const {createProjectWriteBoundary, ensureSafeDirectory, assertSafePath} = require('../dist/src/workspace/writeBoundary.js');
+const {createProjectWriteBoundary, ensureSafeDirectory, assertSafePath, resolveRenderOutputPath} = require('../dist/src/workspace/writeBoundary.js');
 const {PREPRODUCTION_PATHS, readOptionalProjectJson, writeProjectJson} = require('../dist/src/preproduction/store.js');
 
 const log = (message) => console.error(`[mv] ${message}`);
@@ -189,6 +194,8 @@ if (compileReport.status !== 'ready') {
   throw new Error(`Compile is ${compileReport.status}; the project is not render-ready`);
 }
 let candidatePath = compileReport.candidatePath;
+const workflow = openWorkflow(projectId, workspaceRoot);
+const workflowBinding = binding(workflow, selection(workflow));
 log(`compiled candidate: ${candidatePath}`);
 
 // ---------------------------------------------------------------------------
@@ -225,16 +232,20 @@ log(`profile ${profile}: ${renderWidth}x${renderHeight} @ ${project.config.outpu
 // 5b. Production idempotency: never silently overwrite an accepted output
 // ---------------------------------------------------------------------------
 
-const outputAbsolute = path.join(project.projectDir, 'renders', outputName);
+const outputAbsolute = resolveRenderOutputPath(boundary, {mode:'video',projectId,requested:outputName});
+outputName = path.basename(outputAbsolute);
 const evidenceNameFor = profile === 'ci' ? 'production-evidence-ci.json' : 'production-evidence.json';
 const existingEvidencePath = path.join(project.projectDir, 'reports', evidenceNameFor);
+if (existsSync(outputAbsolute) && !existsSync(existingEvidencePath) && !hasFlag('rerender')) {
+  throw new Error('Existing output has no production evidence; choose a new filename or explicitly authorize --rerender');
+}
 if (existsSync(outputAbsolute) && existsSync(existingEvidencePath) && !hasFlag('rerender')) {
   const previous = readJson(existingEvidencePath);
   const sameRevision = previous.storyboard?.revision === storyboard.revision;
   const previousHashes = (previous.assets ?? []).map((entry) => `${entry.requirementId}:${entry.sha256}`).sort();
   const currentHashes = assetChecks.map((entry) => `${entry.requirementId}:${entry.sha256}`).sort();
   const sameAssets = JSON.stringify(previousHashes) === JSON.stringify(currentHashes);
-  if (sameRevision && sameAssets) {
+  if (sameRevision && sameAssets && previous.workflowBinding?.fingerprint === workflowBinding.fingerprint && previous.output?.sha256 === sha(outputAbsolute)) {
     console.error(JSON.stringify({
       status: 'ALREADY_COMPLETE',
       projectId,
@@ -245,7 +256,7 @@ if (existsSync(outputAbsolute) && existsSync(existingEvidencePath) && !hasFlag('
     }, null, 2));
     process.exit(0);
   }
-  log('existing output is stale (storyboard or asset hashes changed); a fresh render will replace it');
+  throw new Error('Existing output is stale; choose --out with a new filename or explicitly authorize --rerender');
 }
 
 // ---------------------------------------------------------------------------
@@ -265,10 +276,22 @@ const renderArgs = [
 let renderExit = 0;
 let renderError = null;
 let attempt = 0;
+const attempts = [];
 for (attempt = 1; attempt <= Math.max(1, retries); attempt++) {
   try {
     log(`render attempt ${attempt}/${Math.max(1, retries)}`);
-    execFileSync(process.execPath, renderArgs, {stdio: 'inherit', windowsHide: true, timeout: 3 * 60 * 60 * 1000});
+    const result = spawnSync(process.execPath, renderArgs, {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true, timeout: 3 * 60 * 60 * 1000});
+    process.stdout.write(result.stdout ?? '');
+    process.stderr.write(result.stderr ?? '');
+    const stderr = result.stderr ?? '';
+    const diagnostic = {attempt, exit: result.status, signal: result.signal, errorCode: result.error?.code ?? null,
+      category: result.error?.code === 'ETIMEDOUT' ? 'timeout' : /ENOSPC|EACCES|EPERM|ENOENT/.test(stderr) ? 'filesystem' : /ffmpeg|encoder|libx264/i.test(stderr) ? 'ffmpeg' : result.status === 0 ? 'success' : 'remotion-or-unclassified',
+      stderr: stderr.slice(-12000), output: existsSync(outputAbsolute) ? {bytes: statSync(outputAbsolute).size, sha256: sha(outputAbsolute)} : null,
+      sourceHashesUnchanged: workflowBinding.sources.every((s) => {try {return sha(workflow.file(s.path)) === s.sha256;} catch {return false;}})};
+    attempts.push(diagnostic);
+    writeProjectJson(boundary, `reports/render-attempts-${profile}.json`, {projectId, profile, attempts});
+    if (!diagnostic.sourceHashesUnchanged) throw new Error('Approved source bytes changed during rendering; refusing fresh success evidence');
+    if (result.status !== 0) throw Object.assign(new Error(`renderer exit=${result.status} signal=${result.signal}: ${stderr.slice(-2000)}`), {status: result.status});
     renderExit = 0;
     renderError = null;
     break;
@@ -344,6 +367,7 @@ const shotTable = (readJson(path.join(project.projectDir, candidatePath)).chapte
 
 const evidence = {
   schemaVersion: 1,
+  workflowBinding,
   projectId,
   profile,
   startedAt,
@@ -395,6 +419,13 @@ const evidence = {
 
 const reportsDir = ensureSafeDirectory(boundary, path.join(boundary.projectRoot, 'reports'), 'project');
 const evidencePath = assertSafePath(boundary, path.join(reportsDir, evidenceNameFor), {expect: 'file', subtree: 'project'});
+// Preserve previous output provenance when the current profile advances.
+for (const record of [existsSync(evidencePath) ? readJson(evidencePath) : null, evidence].filter(Boolean)) {
+  const identity = createHash('sha256').update(JSON.stringify(record)).digest('hex');
+  const relative = `reports/production-history/${identity}.json`;
+  const target = assertSafePath(boundary, path.join(project.projectDir, relative), {expect: 'file'});
+  if (!existsSync(target)) writeProjectJson(boundary, relative, record);
+}
 writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`);
 
 console.log(JSON.stringify({

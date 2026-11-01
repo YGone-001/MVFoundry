@@ -227,6 +227,8 @@ The generated entry calls `bindProjectSceneModules`, which validates the exporte
 
 ## 12. Known boundaries
 
+The operator layer (`factory/scripts/mv-workflow.mjs` and `support/workflow-*.mjs`) composes the existing preproduction validators/compiler, normal loader and range renderer. Draft changes use existing revision paths; content-bound preview/review evidence stays external. Technical promotion and human artistic acceptance are separate. See [operator workflow](docs/operator-workflow.md). Both original full-project verifiers remain mandatory alongside decoded workflow acceptance.
+
 - Video/Hybrid support approved local MP4/H.264 constant-frame-rate, zero-rotation sources only. VFR and rotated sources require preprocessing.
 - `endBehavior` is `reject` only; freeze/hold/end-of-file policies are not implemented.
 - Source in-points must align to output-frame boundaries. Source FPS may differ from output FPS, but exact source-frame selection is not claimed for unsupported VFR material.
