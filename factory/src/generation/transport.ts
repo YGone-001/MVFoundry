@@ -408,3 +408,32 @@ export const createDisabledLiveTransport = (): (() => Promise<never>) => async (
     `LIVE_PROVIDER_EXECUTION = NOT_GRANTED; ${TRANSPORT_POLICY_VERSION} transport refuses to run`,
   );
 };
+
+/**
+ * Bridges the provider adapter's `HttpTransport` to the validated live
+ * transport.
+ *
+ * The adapter builds a request with no notion of authorization scope, so this
+ * bridge supplies the closed authorization-host list from the endpoint policy.
+ * An adapter can therefore never widen where a credential may be sent, and the
+ * bridge performs no network work of its own: it is inert while the live
+ * transport refuses.
+ */
+export const createProviderHttpTransport = (
+  live: (request: TransportRequest) => Promise<TransportResponse>,
+  policy: ProviderEndpointPolicy,
+): ((request: {
+  method: 'GET' | 'POST';
+  url: string;
+  headers: Record<string, string>;
+  body: string | null;
+}) => Promise<{status: number; headers: Record<string, string>; body: string}>) => async (request) => {
+  const response = await live({
+    method: request.method,
+    url: request.url,
+    headers: request.headers,
+    body: request.body,
+    authorizationHosts: [policy.apiHost],
+  });
+  return {status: response.status, headers: response.headers, body: response.body};
+};

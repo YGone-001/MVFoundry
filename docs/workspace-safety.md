@@ -145,6 +145,14 @@ Preproduction files (`annotations.json`, `creative-brief.json`, optional lyrics,
 - `<project>/generation/state/<jobId>.json` records the retrieval finalization phase. It is written through the write boundary and never outside the project.
 - A published provider output is only ever created by renaming a file whose size and SHA256 were verified; a failed finalization removes every partial artefact.
 
+## Pilot admission state
+
+- `<project>/generation/pilot-admission.json` is a project-local admission record. It is written through the write boundary, replaced by an atomic temp-file rename, and re-read under the ledger lock before any consumption, so a crash leaves either the previous document or the new one.
+- The same `ledger.lock` serializes admission consumption and budget reservation. Two processes cannot both consume one admission, and the losing process refuses before any provider call.
+- The record never contains credentials, signed URLs, payloads, private absolute paths, audio or lyrics; the parser rejects those keys and path-like values.
+- A linked (`symlink`/junction) component anywhere on the write path is refused, so the admission cannot be redirected outside the project.
+- `<project>/generation/reports/<jobId>-pilot-*.json` holds submission, retrieval and transport evidence. It stays inside the project and is never published.
+
 ## Tests
 
 The engine tests cover:

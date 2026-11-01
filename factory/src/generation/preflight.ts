@@ -10,10 +10,26 @@ import type {
   PricingSnapshot,
 } from './types';
 import {summarizeLedger} from './ledger';
+import type {PilotEvaluation, PilotPolicyStatus} from './pilotAdmission';
 
 export const PREFLIGHT_SCHEMA_VERSION = 1;
 
 export type PreflightReadiness = 'BLOCKED' | 'READY FOR SEPARATELY AUTHORIZED PILOT';
+
+/**
+ * Technical readiness is a necessary condition, never a permission. It is
+ * reported apart from the policy, budget, disclosure and live-authorization
+ * gates so that `READY` can never be read as "authorized to submit".
+ */
+export type PreflightTechnicalReadiness = 'READY' | 'BLOCKED';
+export type PreflightBudgetReservation = 'ACTIVE' | 'MISSING' | 'UNCERTAIN';
+export type PreflightReferenceDisclosure = 'NOT_REQUIRED' | 'AUTHORIZED' | 'PENDING' | 'DENIED';
+export type PreflightLiveAuthorization = 'GRANTED' | 'NOT_GRANTED';
+export type PreflightSubmissionState =
+  | 'NOT-SUBMITTED'
+  | 'ALREADY-SUBMITTED'
+  | 'UNCERTAIN'
+  | 'CONSUMED';
 
 export type PreflightReferenceStatus = {
   assetId: string;
@@ -37,6 +53,8 @@ export type PreflightInput = {
   credentialsPresent: boolean;
   liveExecutionEnabled: boolean;
   transport: {ready: boolean; reason: string};
+  /** Absent for an ordinary project: the P0 policy denies external generation. */
+  pilot?: PilotEvaluation | null;
   now: Date;
 };
 
@@ -46,9 +64,30 @@ export type PreflightReport = {
   jobId: string;
   generatedAt: string;
   readiness: PreflightReadiness;
+  /** Technical gates only. Never a permission. */
+  technicalReadiness: PreflightTechnicalReadiness;
+  /** Project policy plus pilot-admission status, evaluated independently. */
+  policyAdmission: PilotPolicyStatus;
+  budgetReservation: PreflightBudgetReservation;
+  referenceDisclosure: PreflightReferenceDisclosure;
+  liveExecutionAuthorization: PreflightLiveAuthorization;
+  submissionState: PreflightSubmissionState;
+  admission: {
+    pilotId: string | null;
+    admissionRevision: number | null;
+    approvalState: string | null;
+    consumptionState: string | null;
+    expiresAt: string | null;
+    expired: boolean;
+    refusalCode: string | null;
+    spendCeilingUsd: number | null;
+    checks: Array<{id: string; ok: boolean; detail: string}>;
+    note: string;
+  };
   /** Explicit: technical readiness is not authorization. */
   liveExecution: 'NOT_GRANTED';
-  submissionAuthorized: false;
+  /** Derived from every gate above; false while live execution is not granted. */
+  submissionAuthorized: boolean;
   wouldSend: {
     provider: string;
     model: string;
@@ -101,6 +140,8 @@ export type PreflightReport = {
 };
 
 const OPEN_ENTRY_STATUSES = ['reserved', 'submitted', 'reconciled-unknown'];
+
+const isLiveAuthorized = (value: PreflightLiveAuthorization): boolean => value === 'GRANTED';
 
 /**
  * Builds the operator-facing readiness report. It answers "what would happen if
@@ -195,9 +236,21 @@ export const buildPreflight = (input: PreflightInput): PreflightReport => {
     blockers.push('no budget reservation exists for this job');
   }
 
+  const pilot = input.pilot ?? null;
+  const policyAdmission: PilotPolicyStatus = pilot ? pilot.status : 'DENIED_P0';
+
   if (!input.liveExecutionEnabled) {
     // Not a defect: it is the phase boundary.
     nextSteps.push('live execution is NOT_GRANTED; a separate authorization must enable it for a bounded pilot');
+  }
+  if (policyAdmission === 'DENIED_P0') {
+    nextSteps.push('no pilot admission names this job; the P0 policy denies external generation regardless of technical readiness');
+  }
+  if (policyAdmission === 'ADMITTED_FOR_PILOT') {
+    nextSteps.push('a reviewed pilot admission covers this job; live execution is still NOT_GRANTED, so pilot-submit must refuse');
+  }
+  if (policyAdmission === 'PENDING' || policyAdmission === 'REFUSED') {
+    nextSteps.push('run "generation pilot-inspect --project <id> --job <JOB>" and resolve the admission blockers before any submission');
   }
   if (!permissionRecord) {
     nextSteps.push('run "generation approve-request" to record a per-job authorization');
@@ -216,15 +269,66 @@ export const buildPreflight = (input: PreflightInput): PreflightReport => {
   const readiness: PreflightReadiness = blockers.length === 0
     ? 'READY FOR SEPARATELY AUTHORIZED PILOT'
     : 'BLOCKED';
-
+  const technicalReadiness: PreflightTechnicalReadiness = readiness === 'READY FOR SEPARATELY AUTHORIZED PILOT'
+    ? 'READY'
+    : 'BLOCKED';
+  const budgetReservation: PreflightBudgetReservation = openEntry
+    ? pilot?.budget.uncertain
+      ? 'UNCERTAIN'
+      : 'ACTIVE'
+    : 'MISSING';
+  const referenceDisclosure: PreflightReferenceDisclosure =
+    input.references.length === 0
+      ? 'NOT_REQUIRED'
+      : pilot === null
+        ? 'DENIED'
+        : pilot.referencesAuthorized
+          ? 'AUTHORIZED'
+          : 'PENDING';
+  // There is no code path in this phase that assigns a granted value.
+  let liveExecutionAuthorization: PreflightLiveAuthorization = 'NOT_GRANTED';
+  const submissionState: PreflightSubmissionState =
+    job.execution.providerTaskId !== null
+      ? 'ALREADY-SUBMITTED'
+      : uncertain || pilot?.consumptionState === 'uncertain'
+        ? 'UNCERTAIN'
+        : pilot?.consumptionState === 'consumed'
+          ? 'CONSUMED'
+          : 'NOT-SUBMITTED';
+  const submissionAuthorized =
+    technicalReadiness === 'READY' &&
+    policyAdmission === 'ADMITTED_FOR_PILOT' &&
+    budgetReservation === 'ACTIVE' &&
+    (referenceDisclosure === 'AUTHORIZED' || referenceDisclosure === 'NOT_REQUIRED') &&
+    isLiveAuthorized(liveExecutionAuthorization);
   return {
     schemaVersion: PREFLIGHT_SCHEMA_VERSION,
     projectId: input.project.config.projectId,
     jobId: job.jobId,
     generatedAt: input.now.toISOString(),
     readiness,
+    technicalReadiness,
+    policyAdmission,
+    budgetReservation,
+    referenceDisclosure,
+    liveExecutionAuthorization,
+    submissionState,
+    admission: {
+      pilotId: pilot ? pilot.pilotId : null,
+      admissionRevision: pilot ? pilot.admissionRevision : null,
+      approvalState: pilot ? pilot.approvalState : null,
+      consumptionState: pilot ? pilot.consumptionState : null,
+      expiresAt: pilot ? pilot.expiresAt : null,
+      expired: pilot ? pilot.expired : false,
+      refusalCode: pilot ? pilot.refusalCode : null,
+      spendCeilingUsd: pilot ? pilot.spendCeilingUsd : null,
+      checks: pilot ? pilot.checks : [],
+      note: pilot
+        ? pilot.note
+        : 'No pilot admission names this job: the P0 policy denies external generation.',
+    },
     liveExecution: 'NOT_GRANTED',
-    submissionAuthorized: false,
+    submissionAuthorized,
     wouldSend: {
       provider: job.provider,
       model: job.model,
@@ -273,13 +377,14 @@ export const buildPreflight = (input: PreflightInput): PreflightReport => {
       externalGeneration: input.project.config.permissions.externalGeneration,
       localOnly: input.project.config.permissions.localOnly,
       allowNetwork: input.project.config.permissions.allowNetwork,
-      note: 'The engine currently forbids enabling these flags; opening them is an authorization decision for a separately approved pilot, not a technical prerequisite.',
+      note: 'The engine forbids enabling these project flags. A pilot admission is a separate, project-local overlay evaluated at the submission boundary; it never changes project.json and never relaxes P0 for any other project or job.',
     },
     blockers,
     operatorNextSteps: nextSteps,
     caveats: [
       'A green technical preflight is not authorization to submit.',
-      'Project permission flags are reported separately from technical readiness.',
+      'technicalReadiness, policyAdmission, budgetReservation, referenceDisclosure, liveExecutionAuthorization and submissionState are independent gates; submissionAuthorized is derived from all of them.',
+      'A pilot admission is local operational evidence, not authenticated approval and not cryptographic identity verification.',
       'Budget controls in this project do not limit spend incurred by other clients on the same provider account.',
       'A local cost estimate is not a guarantee of the final invoice.',
       'No live provider request is made by this report.',

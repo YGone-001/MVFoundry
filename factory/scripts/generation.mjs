@@ -54,12 +54,25 @@ if (!command || command === '--help' || command === 'help') {
     [--actual-usd N] [--classification <unknown|estimated|user-entered|provider-reported>] [--task-id <ID>] --notes "<review>"
   ledger-unlock --project <id> --confirm --notes "<why>"
   preflight --project <id> --job <JOB> [--authorize-disclosure] [--snapshot <project-relative.json>]
+  pilot-propose --project <id> --job <JOB> --pilot <ID> [--max-estimated-cost <usd>] \
+    [--spend-ceiling <usd>] [--expires-at <iso>] [--expires-in-hours <h>] [--upload <ASSET,ASSET>] --notes "<review>"
+  pilot-diff --project <id> --job <JOB> --pilot <ID> [--snapshot <project-relative.json>]
+  pilot-validate --project <id> --job <JOB> --pilot <ID> [--authorize-disclosure]
+  pilot-review --project <id> --job <JOB> --pilot <ID> --decision <approve|deny> --notes "<review>"
+  pilot-revoke --project <id> --job <JOB> --pilot <ID> --notes "<why>"
+  pilot-inspect --project <id> --job <JOB> [--pilot <ID>]
+  pilot-request --project <id> --job <JOB> [--pilot <ID>]
+  pilot-submit --project <id> --job <JOB> [--pilot <ID>]     # always refused in this phase
+  pilot-simulate --project <id> --job <JOB> --pilot <ID> --fixtures <project-relative.json>
   transport-check --project <id>
   retrieval-state --project <id> --job <JOB>
   report --project <id>
 
 All commands accept --workspace <external-root> or MV_WORKSPACE_ROOT.
-LIVE_PROVIDER_EXECUTION = NOT_GRANTED in this phase: submit-live always fails closed.
+LIVE_PROVIDER_EXECUTION = NOT_GRANTED in this phase: submit-live and pilot-submit always fail closed.
+A pilot admission is a project-local, reviewed, single-use record that names one project, one job,
+one requirement fingerprint, one provider, one model and one operation. It is operational evidence,
+not authenticated approval, and it never changes project.json permissions or relaxes P0 elsewhere.
 PRIVATE_REFERENCE_UPLOAD = NOT_GRANTED: reference preparation never transfers bytes.
 Only offline-fixture output produces real media locally; it is marked
 synthetic-offline-test-output and is never described as AI generation.
@@ -170,6 +183,28 @@ const {
   unlockLedger,
 } = require('../dist/src/generation/ledger.js');
 const {buildPreflight} = require('../dist/src/generation/preflight.js');
+const {
+  PILOT_ADMISSION_PATHS,
+  PILOT_ID_PATTERN,
+  admissionOutputProfile,
+  evaluatePilotAdmission,
+  findAdmission,
+  findAdmissionForJob,
+  proposePilotAdmission,
+  readPilotAdmissions,
+  reviewPilotAdmission,
+  revokePilotAdmission,
+} = require('../dist/src/generation/pilotAdmission.js');
+const {
+  LIVE_EXECUTION_STATEMENT,
+  LIVE_PROVIDER_EXECUTION_GRANTED,
+  createAdapterDriver,
+  createRefusingDriver,
+  describePilotSubmission,
+  pilotSubmissionRequestView,
+  resumePilotSubmission,
+  runPilotSubmission,
+} = require('../dist/src/generation/submission.js');
 const {readRetrievalState, classifyRecovery} = require('../dist/src/generation/finalization.js');
 const {RUNWAY_ENDPOINT_POLICY, TRANSPORT_POLICY_VERSION} = require('../dist/src/generation/transport.js');
 const {RETRY_POLICY} = require('../dist/src/generation/retry.js');
@@ -1437,8 +1472,164 @@ const run = () => {
     authorizationHeader: 'api host only; never sent to a delivery host',
     tls: 'system trust store, hostname verification, TLS >= 1.2, rejectUnauthorized never disabled',
     retryPolicy: RETRY_POLICY,
-    reason: 'LIVE_PROVIDER_EXECUTION = NOT_GRANTED',
+    reason: LIVE_EXECUTION_STATEMENT,
   });
+
+  // -------------------------------------------------------------------------
+  // Pilot admission and one-shot submission helpers
+  // -------------------------------------------------------------------------
+
+  const providerFor = (ctx, job) =>
+    job.provider === 'runway'
+      ? createRunwayProvider({
+          transport: createDenyingTransport(),
+          apiKey: process.env.RUNWAY_API_KEY ?? null,
+          baseUrl: requireRunwayBaseUrl(),
+        })
+      : createOfflineProvider({outputRoot: path.join(ctx.project.projectDir, GENERATION_PATHS.outputs), jobId: job.jobId});
+
+  const referenceFactsFor = (ctx, job, authorizeDisclosure) => {
+    const provider = providerFor(ctx, job);
+    const model = provider.capabilities.models.find((entry) => entry.id === job.model) ?? null;
+    const disclosure = authorizeDisclosure ? 'authorized-for-simulation' : 'not-authorized';
+    return job.inputAssets.map((asset) => {
+      try {
+        const prepared = prepareReferenceInput({
+          project: ctx.project,
+          assetId: asset.assetId,
+          expectedSha256: asset.sha256,
+          provider: job.provider,
+          model: job.model,
+          maxReferences: model ? model.maxReferences : 0,
+          disclosure,
+          engineRoot: repoRoot,
+        });
+        return {
+          assetId: prepared.assetId,
+          sha256: prepared.sha256,
+          disclosure: prepared.disclosure,
+          bytes: prepared.bytes,
+          blockers: prepared.blockers,
+        };
+      } catch (error) {
+        return {
+          assetId: asset.assetId,
+          sha256: asset.sha256,
+          disclosure,
+          bytes: null,
+          blockers: [error instanceof Error ? error.message : String(error)],
+        };
+      }
+    });
+  };
+
+  const pilotContextFor = (ctx, job, options = {}) => {
+    const requirement =
+      ctx.storyboard.assetRequirements.find((entry) => entry.id === job.requirementId) ?? null;
+    const permissionRecord = readPermissionDocument(ctx.project).find((entry) => entry.jobId === job.jobId) ?? null;
+    const provider = providerFor(ctx, job);
+    const pricing = options.pricing ?? loadSnapshot(ctx);
+    const estimate = estimateFor(job, pricing);
+    const document = readPilotAdmissions(ctx.project);
+    const admission =
+      options.admission !== undefined
+        ? options.admission
+        : options.pilotId
+          ? findAdmission(document, options.pilotId)
+          : findAdmissionForJob(document, job.jobId);
+    // The admission carries the per-reference disclosure decision. A reviewed
+    // admission whose references are all uploadAuthorized is the explicit
+    // authorization; --authorize-disclosure stays the generic, non-pilot switch.
+    const admissionAuthorizesDisclosure =
+      admission !== null &&
+      admission.references.length === job.inputAssets.length &&
+      admission.references.every((entry) => entry.uploadAuthorized);
+    const authorizeDisclosure = Boolean(options.authorizeDisclosure) || admissionAuthorizesDisclosure;
+    const references = referenceFactsFor(ctx, job, authorizeDisclosure);
+    const transport = transportStatus();
+    const request = buildProviderRequest({
+      job,
+      references: job.inputAssets.map((asset) => ({assetId: asset.assetId, path: asset.assetId, sha256: asset.sha256})),
+    });
+    const evaluation = evaluatePilotAdmission({
+      projectId,
+      job,
+      requirement,
+      storyboard: {
+        revision: ctx.storyboard.revision,
+        status: ctx.storyboard.status,
+        renderReady: ctx.storyboard.renderReady,
+      },
+      admission,
+      estimate,
+      pricing,
+      ledger: readLedger(ctx.project),
+      permissionRecord,
+      references,
+      credentialsPresent: Boolean(process.env.RUNWAY_API_KEY),
+      transport: {
+        ready: transport.implemented,
+        reason: transport.gateOpen ? 'live transport gate is open' : transport.reason,
+      },
+      now: new Date(),
+    });
+    return {requirement, permissionRecord, provider, pricing, estimate, references, document, admission, transport, request, evaluation};
+  };
+
+  const pilotDiffRows = (ctx, job, admission) => {
+    const actual = {
+      projectId,
+      jobId: job.jobId,
+      requirementId: job.requirementId,
+      requirementFingerprint: job.requirementFingerprint,
+      storyboardRevision: ctx.storyboard.revision,
+      storyboardStatus: ctx.storyboard.status,
+      provider: job.provider,
+      model: job.model,
+      operation: job.operation,
+      output: admissionOutputProfile(job),
+      references: job.inputAssets.map((asset) => `${asset.assetId}:${asset.sha256}`).sort(),
+    };
+    const admitted = {
+      projectId: admission.projectId,
+      jobId: admission.jobId,
+      requirementId: admission.requirementId,
+      requirementFingerprint: admission.requirementFingerprint,
+      storyboardRevision: admission.storyboardRevision,
+      storyboardStatus: 'approved',
+      provider: admission.provider,
+      model: admission.model,
+      operation: admission.operation,
+      output: admission.output,
+      references: admission.references.map((entry) => `${entry.assetId}:${entry.sha256}`).sort(),
+    };
+    return Object.keys(actual).map((field) => ({
+      field,
+      admitted: admitted[field],
+      current: actual[field],
+      match: JSON.stringify(admitted[field]) === JSON.stringify(actual[field]),
+    }));
+  };
+
+  const requirePilot = (ctx, jobId) => {
+    const pilotId = arg('pilot');
+    const document = readPilotAdmissions(ctx.project);
+    const admission = pilotId
+      ? findAdmission(document, pilotId)
+      : findAdmissionForJob(document, jobId);
+    if (!admission) {
+      fail(
+        pilotId
+          ? `Unknown pilot ${pilotId} for project ${projectId}`
+          : `No pilot admission names job ${jobId}; every pilot command needs an explicit --pilot`,
+      );
+    }
+    if (admission.jobId !== jobId) {
+      fail(`Pilot ${admission.pilotId} is bound to job ${admission.jobId}, not ${jobId}`);
+    }
+    return admission;
+  };
+
 
   if (command === 'pricing') {
     const ctx = loadContext();
@@ -1647,71 +1838,452 @@ const run = () => {
     if (!jobId) fail('--job is required');
     const ctx = loadContext();
     const job = requireJob(ctx, jobId);
-    const requirement = ctx.storyboard.assetRequirements.find((entry) => entry.id === job.requirementId) ?? null;
-    const record = readPermissionDocument(ctx.project).find((entry) => entry.jobId === jobId) ?? null;
-    const provider = job.provider === 'runway'
-      ? createRunwayProvider({
-          transport: createDenyingTransport(),
-          apiKey: process.env.RUNWAY_API_KEY ?? null,
-          baseUrl: requireRunwayBaseUrl(),
-        })
-      : createOfflineProvider({outputRoot: path.join(ctx.project.projectDir, GENERATION_PATHS.outputs), jobId});
-    const model = provider.capabilities.models.find((entry) => entry.id === job.model) ?? null;
-    const disclosure = hasFlag('authorize-disclosure') ? 'authorized-for-simulation' : 'not-authorized';
-    const references = job.inputAssets.map((asset) => {
-      try {
-        const prepared = prepareReferenceInput({
-          project: ctx.project,
-          assetId: asset.assetId,
-          expectedSha256: asset.sha256,
-          provider: job.provider,
-          model: job.model,
-          maxReferences: model ? model.maxReferences : 0,
-          disclosure,
-          engineRoot: repoRoot,
-        });
-        return {assetId: prepared.assetId, disclosure: prepared.disclosure, bytes: prepared.bytes, blockers: prepared.blockers};
-      } catch (error) {
-        return {
-          assetId: asset.assetId,
-          disclosure,
-          bytes: null,
-          blockers: [error instanceof Error ? error.message : String(error)],
-        };
-      }
-    });
-    const request = buildProviderRequest({
-      job,
-      references: job.inputAssets.map((asset) => ({assetId: asset.assetId, path: asset.assetId, sha256: asset.sha256})),
-    });
-    const transport = transportStatus();
+    const pilot = pilotContextFor(ctx, job, {authorizeDisclosure: hasFlag('authorize-disclosure')});
     const report = buildPreflight({
       project: ctx.project,
       job,
-      requirement,
-      permissionRecord: record,
+      requirement: pilot.requirement,
+      permissionRecord: pilot.permissionRecord,
       ledger: readLedger(ctx.project),
-      pricing: loadSnapshot(ctx),
-      estimate: estimateFor(job, loadSnapshot(ctx)),
-      capabilityViolations: provider.validate(request),
-      references,
+      pricing: pilot.pricing,
+      estimate: pilot.estimate,
+      capabilityViolations: pilot.provider.validate(pilot.request),
+      references: pilot.references,
       intakeReview: intakeReviewFor(ctx, job.requirementId),
       storyboard: {revision: ctx.storyboard.revision, status: ctx.storyboard.status, renderReady: ctx.storyboard.renderReady},
       credentialsPresent: Boolean(process.env.RUNWAY_API_KEY),
       liveExecutionEnabled: false,
       transport: {
-        ready: transport.implemented,
-        reason: transport.gateOpen ? 'live transport gate is open' : transport.reason,
-        gateOpen: transport.gateOpen,
+        ready: pilot.transport.implemented,
+        reason: pilot.transport.gateOpen ? 'live transport gate is open' : pilot.transport.reason,
+        gateOpen: pilot.transport.gateOpen,
       },
+      pilot: pilot.admission ? pilot.evaluation : null,
       now: new Date(),
     });
     console.log(JSON.stringify({
       ...report,
-      transportPolicy: transport,
-      note: 'A green technical preflight is not authorization to submit. Live execution remains NOT_GRANTED.',
+      transportPolicy: pilot.transport,
+      note: 'technicalReadiness is not authorization. policyAdmission, budgetReservation, referenceDisclosure and liveExecutionAuthorization are separate gates; live execution remains NOT_GRANTED.',
     }, null, 2));
     return report.readiness === 'READY FOR SEPARATELY AUTHORIZED PILOT' ? 0 : 2;
+  }
+
+  if (command === 'pilot-propose') {
+    const jobId = arg('job');
+    if (!jobId) fail('--job is required');
+    const pilotId = arg('pilot');
+    if (!pilotId) fail('--pilot is required: a pilot admission is always named explicitly');
+    if (!PILOT_ID_PATTERN.test(pilotId)) {
+      fail('--pilot must be lowercase letters, digits and hyphens (3-64 chars)');
+    }
+    const notes = arg('notes');
+    if (!notes) fail('--notes is required: record the review that led to this proposal');
+    const ctx = loadContext();
+    const job = requireJob(ctx, jobId);
+    if (job.provider !== 'runway') {
+      fail(`Job ${jobId} uses provider ${job.provider}; a pilot admission targets the external provider only`);
+    }
+    const requirement = ctx.storyboard.assetRequirements.find((entry) => entry.id === job.requirementId);
+    if (!requirement) fail(`Job ${jobId} references unknown requirement ${job.requirementId}`);
+    if (requirement.fingerprint !== job.requirementFingerprint) {
+      fail('Requirement changed since the job was prepared; prepare a new job instead of admitting a stale one');
+    }
+    if (ctx.storyboard.status !== 'approved') {
+      fail(`Storyboard revision ${ctx.storyboard.revision} is ${ctx.storyboard.status}; approve it before proposing a pilot`);
+    }
+    const record = readPermissionDocument(ctx.project).find((entry) => entry.jobId === jobId) ?? null;
+    if (!record) fail(`No permission record exists for job ${jobId}; run approve-request first`);
+    if (record.authorization === 'denied') fail(`The permission record for ${jobId} is denied`);
+    const pricing = loadSnapshot(ctx);
+    const estimate = estimateFor(job, pricing);
+    if (!estimate.ok) fail(`Cannot admit a job without a supported cost estimate: ${estimate.code} ${estimate.message}`);
+    const currentEstimate = estimate.estimate.estimatedUsd;
+    const maxEstimatedRaw = arg('max-estimated-cost');
+    const maxEstimatedCostUsd = maxEstimatedRaw === undefined ? currentEstimate : Number(maxEstimatedRaw);
+    if (!Number.isFinite(maxEstimatedCostUsd) || maxEstimatedCostUsd < 0) {
+      fail('--max-estimated-cost must be a non-negative number');
+    }
+    if (maxEstimatedCostUsd + 1e-9 < currentEstimate) {
+      fail(`--max-estimated-cost ${maxEstimatedCostUsd} is below the current estimate ${currentEstimate}`);
+    }
+    const ceilingRaw = arg('spend-ceiling');
+    const spendCeiling = ceilingRaw === undefined ? record.maxSpendUsd : Number(ceilingRaw);
+    if (!Number.isFinite(spendCeiling) || spendCeiling < 0) fail('--spend-ceiling must be a non-negative number');
+    if (spendCeiling > record.maxSpendUsd + 1e-9) {
+      fail(`--spend-ceiling ${spendCeiling} cannot exceed the per-job authorization of ${record.maxSpendUsd}`);
+    }
+    if (spendCeiling + 1e-9 < currentEstimate) {
+      fail(`--spend-ceiling ${spendCeiling} is below the current estimate ${currentEstimate}`);
+    }
+    const now = new Date();
+    const expiresInHours = Number(arg('expires-in-hours', '24'));
+    if (!Number.isFinite(expiresInHours) || expiresInHours <= 0) fail('--expires-in-hours must be a positive number');
+    const expiresAt = arg('expires-at') ?? new Date(now.getTime() + expiresInHours * 3_600_000).toISOString();
+    if (Number.isNaN(Date.parse(expiresAt))) fail('--expires-at must be an ISO 8601 timestamp');
+    if (Date.parse(expiresAt) <= now.getTime()) fail('--expires-at must be in the future');
+    const uploadList = String(arg('upload', '') ?? '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+    for (const assetId of uploadList) {
+      if (!job.inputAssets.some((asset) => asset.assetId === assetId)) {
+        fail(`--upload names ${assetId}, which is not a reference of job ${jobId}`);
+      }
+    }
+    const document = readPilotAdmissions(ctx.project);
+    const admission = {
+      schemaVersion: 1,
+      admissionRevision: 1,
+      pilotId,
+      projectId,
+      jobId,
+      requirementId: job.requirementId,
+      requirementFingerprint: job.requirementFingerprint,
+      storyboardRevision: ctx.storyboard.revision,
+      provider: job.provider,
+      model: job.model,
+      operation: job.operation,
+      output: admissionOutputProfile(job),
+      pricing: {pricingVersion: pricing.pricingVersion, snapshotSha256: pricing.snapshotSha256},
+      maxEstimatedCostUsd,
+      authorizedSpendCeilingUsd: spendCeiling,
+      maxSubmissions: 1,
+      references: job.inputAssets.map((asset) => ({
+        assetId: asset.assetId,
+        sha256: asset.sha256,
+        uploadAuthorized: uploadList.includes(asset.assetId),
+      })),
+      approvalState: 'proposed',
+      approval: {reviewedAt: null, notes: ''},
+      createdAt: now.toISOString(),
+      expiresAt,
+      consumption: {state: 'unconsumed', submissionKey: null, consumedAt: null, providerTaskId: null, note: null},
+      operatorNotes: notes,
+    };
+    proposePilotAdmission({boundary: ctx.boundary, document, admission});
+    console.log(JSON.stringify({
+      projectId,
+      jobId,
+      pilotId,
+      path: PILOT_ADMISSION_PATHS.document,
+      admission,
+      note: 'Proposed only. It authorizes nothing until it is reviewed, and live execution remains NOT_GRANTED.',
+    }, null, 2));
+    return 0;
+  }
+
+  if (command === 'pilot-diff' || command === 'pilot-validate' || command === 'pilot-review' ||
+      command === 'pilot-revoke' || command === 'pilot-inspect' || command === 'pilot-request') {
+    const jobId = arg('job');
+    if (!jobId) fail('--job is required: every pilot command names exactly one job');
+    const ctx = loadContext();
+    const job = requireJob(ctx, jobId);
+    const admission = requirePilot(ctx, jobId);
+    const rows = pilotDiffRows(ctx, job, admission);
+    const mismatches = rows.filter((row) => !row.match);
+
+    if (command === 'pilot-diff') {
+      const pilot = pilotContextFor(ctx, job, {admission, authorizeDisclosure: hasFlag('authorize-disclosure')});
+      console.log(JSON.stringify({
+        projectId,
+        jobId,
+        pilotId: admission.pilotId,
+        identical: mismatches.length === 0,
+        rows: [...rows, {
+          field: 'pricing',
+          admitted: admission.pricing,
+          current: {pricingVersion: pilot.pricing.pricingVersion, snapshotSha256: pilot.pricing.snapshotSha256},
+          match: pilot.evaluation.pricingCurrent,
+        }, {
+          field: 'estimatedCost',
+          admitted: admission.maxEstimatedCostUsd,
+          current: pilot.evaluation.estimatedUsd,
+          match: pilot.evaluation.estimatedUsd !== null && pilot.evaluation.estimatedUsd <= admission.maxEstimatedCostUsd + 1e-9,
+        }, {
+          field: 'referenceUploadAuthorized',
+          admitted: admission.references.filter((entry) => entry.uploadAuthorized).map((entry) => entry.assetId),
+          current: pilot.references.filter((entry) => entry.blockers.length === 0).map((entry) => entry.assetId),
+          match: pilot.evaluation.referencesAuthorized,
+        }],
+        mismatches: mismatches.map((row) => row.field),
+        note: 'A diff is read-only. Nothing is authorized, consumed or sent.',
+      }, null, 2));
+      return mismatches.length === 0 ? 0 : 2;
+    }
+
+    if (command === 'pilot-validate') {
+      const pilot = pilotContextFor(ctx, job, {admission, authorizeDisclosure: hasFlag('authorize-disclosure')});
+      console.log(JSON.stringify({
+        projectId,
+        jobId,
+        pilotId: admission.pilotId,
+        status: pilot.evaluation.status,
+        refusalCode: pilot.evaluation.refusalCode,
+        expired: pilot.evaluation.expired,
+        expiresAt: pilot.evaluation.expiresAt,
+        consumptionState: pilot.evaluation.consumptionState,
+        bindingMismatches: mismatches.map((row) => row.field),
+        checks: pilot.evaluation.checks,
+        blockers: pilot.evaluation.blockers,
+        liveExecutionAuthorization: 'NOT_GRANTED',
+        submissionAuthorized: false,
+        note: 'ADMITTED_FOR_PILOT is a policy scope, not a live authorization. Live execution remains NOT_GRANTED.',
+      }, null, 2));
+      return pilot.evaluation.status === 'ADMITTED_FOR_PILOT' ? 0 : 2;
+    }
+
+    if (command === 'pilot-review') {
+      const decision = arg('decision');
+      if (!['approve', 'deny'].includes(decision)) fail('--decision must be approve or deny');
+      const notes = arg('notes');
+      if (!notes) fail('--notes is required: record the review behind this decision');
+      if (mismatches.length > 0) {
+        fail(`Refusing to review a mismatched admission: ${mismatches.map((row) => row.field).join(', ')}`);
+      }
+      if (decision === 'approve') {
+        const pilot = pilotContextFor(ctx, job, {admission, authorizeDisclosure: hasFlag('authorize-disclosure')});
+        const blockingChecks = pilot.evaluation.checks.filter(
+          (check) => !check.ok && !['approval-state', 'consumption-state', 'credentials', 'transport'].includes(check.id),
+        );
+        if (blockingChecks.length > 0) {
+          fail(`Refusing to approve: ${blockingChecks.map((check) => `${check.id} (${check.detail})`).join('; ')}`);
+        }
+      }
+      reviewPilotAdmission({boundary: ctx.boundary, document: readPilotAdmissions(ctx.project), pilotId: admission.pilotId, decision, notes, now: new Date()});
+      const updated = findAdmission(readPilotAdmissions(ctx.project), admission.pilotId);
+      console.log(JSON.stringify({
+        projectId,
+        jobId,
+        pilotId: admission.pilotId,
+        approvalState: updated.approvalState,
+        approval: updated.approval,
+        note: 'A local review is operational evidence, not authenticated approval. Live execution remains NOT_GRANTED.',
+      }, null, 2));
+      return decision === 'approve' ? 0 : 2;
+    }
+
+    if (command === 'pilot-revoke') {
+      const notes = arg('notes');
+      if (!notes) fail('--notes is required: record why the admission is being revoked');
+      revokePilotAdmission({boundary: ctx.boundary, document: readPilotAdmissions(ctx.project), pilotId: admission.pilotId, notes, now: new Date()});
+      const updated = findAdmission(readPilotAdmissions(ctx.project), admission.pilotId);
+      console.log(JSON.stringify({
+        projectId,
+        jobId,
+        pilotId: admission.pilotId,
+        approvalState: updated.approvalState,
+        consumptionState: updated.consumption.state,
+        note: 'Revocation is forward-only and requires a new pilot id for any future attempt.',
+      }, null, 2));
+      return 0;
+    }
+
+    if (command === 'pilot-inspect') {
+      const pilot = pilotContextFor(ctx, job, {admission, authorizeDisclosure: hasFlag('authorize-disclosure')});
+      console.log(JSON.stringify({
+        projectId,
+        jobId,
+        pilotId: admission.pilotId,
+        admission,
+        evaluation: pilot.evaluation,
+        submission: describePilotSubmission(job),
+        liveExecutionAuthorization: 'NOT_GRANTED',
+        submissionAuthorized: false,
+        remainingBlockers: pilot.evaluation.blockers,
+        note: 'Everything shown here is local. No provider was contacted.',
+      }, null, 2));
+      return 0;
+    }
+
+    const pilot = pilotContextFor(ctx, job, {admission, authorizeDisclosure: hasFlag('authorize-disclosure')});
+    console.log(JSON.stringify({
+      projectId,
+      jobId,
+      pilotId: admission.pilotId,
+      admissionStatus: pilot.evaluation.status,
+      request: pilotSubmissionRequestView(pilot.request, RUNWAY_ENDPOINT_POLICY),
+      blockers: pilot.evaluation.blockers,
+      liveExecutionAuthorization: 'NOT_GRANTED',
+      note: 'This is the exact request a separately authorized pilot would submit. Nothing is sent here.',
+    }, null, 2));
+    return pilot.evaluation.status === 'ADMITTED_FOR_PILOT' ? 0 : 2;
+  }
+
+  if (command === 'pilot-submit') {
+    const jobId = arg('job');
+    if (!jobId) fail('--job is required: an implicit submission is never allowed');
+    const ctx = loadContext();
+    const job = requireJob(ctx, jobId);
+    const admission = requirePilot(ctx, jobId);
+    const pilot = pilotContextFor(ctx, job, {admission, authorizeDisclosure: hasFlag('authorize-disclosure')});
+    return runPilotSubmission({
+      project: ctx.project,
+      boundary: ctx.boundary,
+      job,
+      requirement: pilot.requirement,
+      storyboard: {revision: ctx.storyboard.revision, status: ctx.storyboard.status, renderReady: ctx.storyboard.renderReady},
+      permissionRecord: pilot.permissionRecord,
+      capabilities: pilot.provider.capabilities,
+      capabilityViolations: pilot.provider.validate(pilot.request),
+      request: pilot.request,
+      estimate: pilot.estimate,
+      pricing: pilot.pricing,
+      references: pilot.references,
+      credentialsPresent: Boolean(process.env.RUNWAY_API_KEY),
+      transport: {ready: pilot.transport.implemented, reason: pilot.transport.reason},
+      endpoint: {
+        provider: RUNWAY_ENDPOINT_POLICY.provider,
+        apiHost: RUNWAY_ENDPOINT_POLICY.apiHost,
+        deliveryHosts: RUNWAY_ENDPOINT_POLICY.deliveryHosts,
+      },
+      grant: {kind: 'live', approvalRef: admission.pilotId},
+      pilotId: admission.pilotId,
+      driver: createRefusingDriver(),
+    }).then((outcome) => {
+      console.log(JSON.stringify({
+        ...outcome,
+        liveProviderExecutionGranted: LIVE_PROVIDER_EXECUTION_GRANTED,
+        note: 'pilot-submit never submits in this phase. The admission is not consumed and nothing leaves the machine.',
+      }, null, 2));
+      return 1;
+    });
+  }
+
+  if (command === 'pilot-simulate') {
+    const jobId = arg('job');
+    if (!jobId) fail('--job is required');
+    const fixturesArg = arg('fixtures');
+    if (!fixturesArg) fail('--fixtures is required: a simulation replays recorded responses, never a live endpoint');
+    const ctx = loadContext();
+    const job = requireJob(ctx, jobId);
+    const admission = requirePilot(ctx, jobId);
+    const pilot = pilotContextFor(ctx, job, {admission, authorizeDisclosure: hasFlag('authorize-disclosure')});
+    const fixture = JSON.parse(readFileSync(resolveProjectRelativePath(ctx.project.projectDir, fixturesArg, {engineRoot: repoRoot}), 'utf8'));
+    const responses = Array.isArray(fixture.responses) ? fixture.responses : [];
+    if (responses.length === 0) fail('The simulation fixture declares no recorded responses');
+    let cursor = 0;
+    const callTransport = async () => {
+      const scripted = responses[Math.min(cursor, responses.length - 1)];
+      cursor += 1;
+      if (scripted.timeout === true) {
+        const error = new Error('simulated network timeout after submission');
+        error.transmitted = true;
+        throw error;
+      }
+      return {status: scripted.status, headers: scripted.headers ?? {}, body: JSON.stringify(scripted.body ?? {})};
+    };
+    const simulatedProvider = createRunwayProvider({
+      transport: callTransport,
+      apiKey: 'simulation-key-never-live',
+      baseUrl: requireRunwayBaseUrl(),
+    });
+    return runPilotSubmission({
+      project: ctx.project,
+      boundary: ctx.boundary,
+      job,
+      requirement: pilot.requirement,
+      storyboard: {revision: ctx.storyboard.revision, status: ctx.storyboard.status, renderReady: ctx.storyboard.renderReady},
+      permissionRecord: pilot.permissionRecord,
+      capabilities: simulatedProvider.capabilities,
+      capabilityViolations: simulatedProvider.validate(pilot.request),
+      request: pilot.request,
+      estimate: pilot.estimate,
+      pricing: pilot.pricing,
+      references: pilot.references,
+      credentialsPresent: true,
+      transport: {ready: true, reason: 'simulated transport'},
+      endpoint: {
+        provider: RUNWAY_ENDPOINT_POLICY.provider,
+        apiHost: RUNWAY_ENDPOINT_POLICY.apiHost,
+        deliveryHosts: RUNWAY_ENDPOINT_POLICY.deliveryHosts,
+      },
+      grant: {kind: 'simulated', reason: 'operator-requested offline simulation through recorded responses'},
+      pilotId: admission.pilotId,
+      driver: createAdapterDriver(simulatedProvider, 'simulated'),
+    }).then((outcome) => {
+      if (outcome.status === 'submitted') {
+        const downloadScript = fixture.download;
+        const taskResponses = Array.isArray(fixture.tasks) ? fixture.tasks : fixture.task ? [fixture.task] : [];
+        const hasDownload = Boolean(downloadScript && Array.isArray(downloadScript.steps) && downloadScript.steps.length > 0);
+        const policy = OUTPUT_HOST_POLICIES[job.provider];
+        const scripted = hasDownload
+          ? createScriptedDownloadTransport(downloadScript, (relative) =>
+              readFileSync(resolveProjectRelativePath(ctx.project.projectDir, relative, {engineRoot: repoRoot})))
+          : null;
+        const resolver = hasDownload ? createScriptedResolver(downloadScript) : null;
+        let taskCursor = 0;
+        const taskTransport = taskResponses.length === 0
+          ? callTransport
+          : async () => {
+              const entry = taskResponses[Math.min(taskCursor, taskResponses.length - 1)];
+              taskCursor += 1;
+              return {status: entry.status ?? 200, headers: entry.headers ?? {}, body: JSON.stringify(entry.body ?? {})};
+            };
+        const retrievalProvider = createRunwayProvider({
+          transport: taskTransport,
+          apiKey: 'simulation-key-never-live',
+          baseUrl: requireRunwayBaseUrl(),
+        });
+        const extension = job.output.kind === 'video' ? 'mp4' : 'png';
+        const destination = `${GENERATION_PATHS.outputs}/${jobId}/${jobId}-provider.${extension}`;
+        const current = jobsOrEmpty(ctx.project).find((entry) => entry.jobId === jobId) ?? job;
+        // Polling always runs, so a failed or canceled provider task is reported
+        // as a failure rather than as a successful submission. Retrieval only
+        // happens for a succeeded task, which is why the download is checked here.
+        return resumePilotSubmission({
+          project: ctx.project,
+          boundary: ctx.boundary,
+          job: current,
+          driver: createAdapterDriver(retrievalProvider, 'simulated'),
+          transport: {ready: true, reason: 'simulated transport'},
+          retrieve: async ({taskId, expectation}) => {
+            if (!hasDownload || !scripted || !resolver) {
+              fail('The fixture declares no download script, so the retrieved output cannot be replayed');
+            }
+            const output = await retrievalProvider.retrieve(taskId, expectation);
+            const bound = bindProviderOutput({job: current, output});
+            if (bound.file.source !== 'https') fail('Simulated retrieval requires an HTTPS provider location');
+            validateOutputUrl(bound.file.location, policy);
+            ensureSafeDirectory(ctx.boundary, path.dirname(path.join(ctx.project.projectDir, destination)), 'project');
+            assertSafePath(ctx.boundary, path.join(ctx.project.projectDir, destination), {expect: 'file', subtree: 'project'});
+            const result = await retrieveRemoteOutput({
+              boundary: ctx.boundary,
+              jobId,
+              providerTaskId: bound.providerTaskId,
+              kind: bound.kind,
+              url: bound.file.location,
+              policy,
+              transport: scripted.transport,
+              resolver,
+              targetRelativePath: destination,
+            });
+            return {
+              storedPath: result.record.storedPath,
+              sha256: result.record.sha256,
+              bytes: result.record.bytes,
+              contentType: result.record.contentType,
+              source: result.record.source,
+              redirects: result.record.redirects,
+            };
+          },
+        }).then((resumed) => {
+          console.log(JSON.stringify({
+            ...outcome,
+            resumed,
+            liveProviderExecutionGranted: LIVE_PROVIDER_EXECUTION_GRANTED,
+            note: 'Simulated one-shot only: recorded responses, injected transport, no provider contacted. The result stays pending intake until a reviewer approves it.',
+          }, null, 2));
+          return resumed.state === 'retrieved' ? 0 : 1;
+        });
+      }
+      console.log(JSON.stringify({
+        ...outcome,
+        liveProviderExecutionGranted: LIVE_PROVIDER_EXECUTION_GRANTED,
+        note: 'The simulated submission did not reach the provider boundary.',
+      }, null, 2));
+      return 1;
+    });
   }
 
   if (command === 'report') {

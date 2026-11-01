@@ -123,3 +123,15 @@ Defines how generated media may enter a local project. P0 authorizes no provider
 - Provider output is published only by renaming a verified file. There is no copy-into-destination fallback, an interrupted download publishes nothing, and a restart classifies the on-disk state instead of guessing.
 - `generation preflight` reports what would be sent, what would leave the machine, the estimate, the remaining budget and the blockers. A green preflight reads `READY FOR SEPARATELY AUTHORIZED PILOT`, never `LIVE PROVIDER VERIFIED`, and is never authorization to submit.
 - Project budget controls do not limit spend incurred by other clients on the same provider account. Never claim otherwise, and never present a local estimate as the final invoice.
+
+## Pilot policy admission (P1-E-F)
+
+- `project.json` permissions stay at the P0 values. Never propose enabling `externalGeneration`, `localOnly: false` or `allowNetwork: true`; a pilot admission is a separate project-local record, not a project mode.
+- A pilot admission binds one pilot id to one project, job, requirement fingerprint, storyboard revision, provider, model, operation, output profile, price snapshot, spend ceiling, exactly one submission and an exact reference set with a per-reference upload decision. Anything else is out of scope.
+- Treat the admission as local operational evidence. Never describe it as authenticated approval, identity verification, a provider-side grant or a billing control.
+- A pilot id is single-use. An expired, revoked or consumed admission is refused, never renewed: propose a new id after a fresh review.
+- Approve only after `pilot-diff` shows no mismatch and `pilot-validate` reports `ADMITTED_FOR_PILOT`; a reference without a recorded upload decision must block the review.
+- `pilot-submit` always refuses while `LIVE_PROVIDER_EXECUTION` is `NOT_GRANTED`, and that refusal must not consume the admission. A refused submission is a correct outcome, not a bug to work around.
+- Exactly one process may own a submission. If two processes race the same admission, the loser must fail before any provider call; never add a retry loop around a submission.
+- An unknown submission outcome parks the job and keeps the budget exposed. Never invent a task id, a success, a cost or a refund, and never retry until the task is reconciled.
+- `pilot-simulate` is the only sanctioned way to rehearse the lifecycle. It replays recorded responses through an injected transport and leaves the output pending intake; it is not evidence of provider behaviour.

@@ -175,6 +175,7 @@ Do not treat plans, prior reports or user summaries as proof of the current file
 
 - `npm run provider:seed` creates `synthetic-provider-image-demo`, `synthetic-provider-video-demo`, `synthetic-provider-hybrid-demo` and `synthetic-provider-guard-demo` in a fresh external workspace. `npm run provider:verify` is mandatory in Windows CI and runs entirely through injected fake transports.
 - `npm run golive:seed` and `npm run golive:verify` are the go-live readiness suite: pricing, spend reservations, cross-process concurrency, transport policy, retrieval finalization, crash recovery, operator preflight and a full generation-to-render regression. Both are mandatory in Windows CI and are never conditionally skipped.
+- `npm run pilot:seed` and `npm run pilot:verify` are the pilot-admission suite: ordinary P0 refusals, admission binding and revocation, one-shot ownership under two operating-system processes, the fake-provider lifecycle to a real rendered MP4, and the transport wiring against a controlled local HTTPS server. Both are mandatory in Windows CI and are never conditionally skipped. The suite receives no credential: it sets a recognisable placeholder and asserts it never appears in any output.
 - Acceptance means: simulated remote result → real local bytes → validated/normalized file → approved asset → real rendered video, with decoded frames and soundtrack inspected. A TypeScript build or a simulated API response alone is not acceptance.
 - The verifier must never be conditionally skipped, never upload artifacts, and never receive credentials.
 
@@ -217,8 +218,25 @@ Do not treat plans, prior reports or user summaries as proof of the current file
 ### Operator preflight
 
 - `generation preflight` answers what would be sent, which model and assets would leave the machine, whether disclosure is authorized, the estimated maximum charge, the remaining budget, the submission limit, capability compliance, transport readiness, credential presence (never the value), requirement currency and whether the job is already submitted.
-- A green technical preflight is not authorization. The report always states `liveExecution: NOT_GRANTED` and `submissionAuthorized: false`, and a passing result reads `READY FOR SEPARATELY AUTHORIZED PILOT`, never `LIVE PROVIDER VERIFIED`.
-- Project permission flags (`externalGeneration`, `localOnly`, `allowNetwork`) are reported as a separate policy gate. The engine currently forbids enabling them; opening them is an authorization decision, not a technical prerequisite.
+- A green technical preflight is not authorization. The report always states `liveExecution: NOT_GRANTED` and derives `submissionAuthorized` from every gate, so it is false in this phase. A passing technical result reads `READY FOR SEPARATELY AUTHORIZED PILOT`, never `LIVE PROVIDER VERIFIED`.
+- Project permission flags (`externalGeneration`, `localOnly`, `allowNetwork`) are reported as a separate policy gate. The engine forbids enabling them. A pilot admission is an overlay evaluated at the submission boundary; it never changes `project.json` and never relaxes P0 for another project or job.
+
+### Pilot policy admission and one-shot execution
+
+- P0 stays the default-deny boundary. `validateProjectConfig` continues to reject `externalGeneration: true`, `localOnly: false` and `allowNetwork: true`, and no project field can express pilot mode. The effective policy is computed only at the submission boundary (`factory/src/generation/pilotAdmission.ts`), never by the project validator.
+- A pilot admission is a project-local, reviewed, single-use record (`generation/pilot-admission.json`) that binds one pilot id to one project, job, requirement id and fingerprint, storyboard revision, provider, model, operation, output profile, pricing snapshot identity, maximum estimated cost, spend ceiling, exactly one submission, and an exact reference set with a per-reference `uploadAuthorized` decision.
+- The record must not contain credentials, bearer tokens, signed URLs, raw payloads, private absolute paths, song audio or lyrics. `parsePilotAdmissionDocument` rejects those keys and values structurally, so a future field cannot smuggle them in.
+- An admission is local operational evidence. Never describe it as authenticated approval, cryptographic identity verification, billing control or a provider-side authorization.
+- Staleness fails closed: a changed project, job, requirement fingerprint, storyboard revision, model, operation, output profile, reference hash, pricing snapshot, expiry, revocation or consumption refuses the admission with a stable refusal code. Nothing renews silently; a new attempt requires a new pilot id.
+- Technical readiness, policy admission, budget reservation, reference disclosure, live-execution authorization and submission state are reported as separate fields. `submissionAuthorized` is derived from all of them and cannot be true while live execution is not granted.
+- `LIVE_PROVIDER_EXECUTION_GRANTED` in `factory/src/generation/submission.ts` is `false`. `pilot-submit` always refuses at the live-authorization gate and does not consume the admission. Flipping that constant is a separately authorized engine change, not a configuration option; no environment variable, project field or admission record can set it.
+- Submission ownership is taken inside the project ledger lock (`consumePilotAdmission`), so exactly one local process can consume an admission. The losing process refuses before any provider call, and a job can never hold two reservations.
+- A job is submitted at most once. The provider task id is persisted before any polling. A failure after the request may have been transmitted parks the job as `unknown-submission-state` and the admission as `uncertain`; neither is released automatically and no retry is permitted without reconciliation.
+- Only a failure decided before a socket is opened may return an admission to `unconsumed`; that closed set lives in `submissionFailureTransmitted`. Everything else is treated as financially exposed.
+- A conflicting provider task id is a hard failure, never a silent rebind.
+- Reference disclosure is recorded per reference. A reviewed admission that authorizes every reference is the disclosure decision for that pilot; `generation prepare-references --authorize-disclosure` remains the generic, non-pilot switch.
+- The live transport stays closed: the submission boundary accepts only an injected `simulated` grant with a simulated driver. The acceptance suite drives the real adapter and the real secure transport against a controlled local HTTPS server, and proves the same transport refuses every request while the gate is closed.
+- `npm run pilot:seed` and `npm run pilot:verify` are mandatory in Windows CI and are never conditionally skipped. They cover ordinary P0 refusals, admission binding and revocation, one-shot consumption under two operating-system processes, the fake-provider lifecycle to a real rendered MP4 with decoded frames and soundtrack, and the transport wiring.
 
 ### Publication audit
 
@@ -276,6 +294,10 @@ npm run generation:seed
 npm run generation:verify
 npm run provider:seed
 npm run provider:verify
+npm run golive:seed
+npm run golive:verify
+npm run pilot:seed
+npm run pilot:verify
 npm run preproduction -- continuity --project synthetic-mixed-timeline-demo
 npm run preproduction -- tasks --project synthetic-mixed-timeline-demo
 npm run preproduction -- attach-asset --project synthetic-mixed-timeline-demo --requirement REQ-001 --asset-id VID-HARBOUR --path intake/video/harbour-30fps.mp4 --provenance "<source>" --rights "<licence>"

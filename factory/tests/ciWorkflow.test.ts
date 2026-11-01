@@ -99,6 +99,8 @@ test('G12: workflow runs the required engine and security commands', () => {
     'npm run provider:verify',
     'npm run golive:seed',
     'npm run golive:verify',
+    'npm run pilot:seed',
+    'npm run pilot:verify',
     'npm run audit:publication',
     'npm run audit:git',
   ]) {
@@ -159,6 +161,9 @@ test('G12: workspace is initialized from RUNNER_TEMP via GITHUB_ENV before seedi
   const providerVerifyIndex = names.indexOf('Verify provider retrieval, normalization and real renders');
   const goliveSeedIndex = names.indexOf('Seed go-live readiness workspace');
   const goliveVerifyIndex = names.indexOf('Verify go-live readiness, spend controls and transport policy');
+  const opensslIndex = names.indexOf('Ensure openssl for the controlled local TLS server');
+  const pilotSeedIndex = names.indexOf('Seed pilot admission workspace');
+  const pilotVerifyIndex = names.indexOf('Verify pilot admission, one-shot execution and a real render');
   assert.ok(provisionIndex >= 0 && ffmpegIndex > provisionIndex, 'FFmpeg provisioning must precede verification');
   assert.ok(typecheckIndex > ffmpegIndex, 'FFmpeg must be provisioned and verified before typecheck');
   assert.ok(testIndex > typecheckIndex, 'tests must follow typecheck');
@@ -181,9 +186,14 @@ test('G12: workspace is initialized from RUNNER_TEMP via GITHUB_ENV before seedi
   assert.ok(providerVerifyIndex > providerSeedIndex, 'provider-output verification must follow its seeding');
   assert.ok(goliveSeedIndex > providerVerifyIndex, 'go-live seeding must follow provider-output verification');
   assert.ok(goliveVerifyIndex > goliveSeedIndex, 'go-live verification must follow its seeding');
-  assert.ok(names.indexOf('Publication audit') > goliveVerifyIndex, 'publication audit must follow go-live verification');
-  assert.ok(names.indexOf('Git media audit') > goliveVerifyIndex, 'Git media audit must follow go-live verification');
+  assert.ok(opensslIndex > goliveVerifyIndex, 'the TLS tooling check must follow go-live verification');
+  assert.ok(pilotSeedIndex > opensslIndex, 'pilot seeding must follow the TLS tooling check');
+  assert.ok(pilotVerifyIndex > pilotSeedIndex, 'pilot verification must follow its seeding');
+  assert.ok(names.indexOf('Publication audit') > pilotVerifyIndex, 'publication audit must follow pilot verification');
+  assert.ok(names.indexOf('Git media audit') > pilotVerifyIndex, 'Git media audit must follow pilot verification');
   assert.ok(!names.includes('Record media/audio render limitation'), 'audio acceptance must not be skippable');
+  assert.match(workflow, /npm run pilot:verify/);
+  assert.doesNotMatch(workflow, /continue-on-error:\s*true/, 'no acceptance step may be allowed to fail softly');
 
   const provision = steps[provisionIndex];
   const provisionText = provision.lines.join('\n');

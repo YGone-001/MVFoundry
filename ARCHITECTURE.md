@@ -158,6 +158,15 @@ Preproduction is a local planning layer, not semantic music understanding and no
 - `factory/src/generation/preflight.ts` produces the operator readiness report, keeping technical readiness, policy gates and authorization strictly separate.
 - `factory/scripts/seed-golive-workspace.mjs` and `factory/scripts/verify-golive-readiness.mjs` implement the go-live acceptance suite: pricing, cross-process budget races, transport and retrieval negatives, crash recovery, and a full generation-to-render regression.
 
+## 9d. Pilot policy admission and one-shot execution
+
+- The P0 project policy is unchanged: `validateProjectConfig` still rejects `externalGeneration: true`, `localOnly: false` and `allowNetwork: true`, and no project field expresses pilot mode. The effective policy is computed only at the submission boundary, which keeps "may this project do external work?" independent of runtime input.
+- `factory/src/generation/pilotAdmission.ts` owns the versioned admission record, its closed key allowlist, the structural rejection of credentials/signed URLs/payloads/private paths/audio/lyrics, staleness evaluation with stable refusal codes, and the review/revoke/consume transitions. A pilot id is single-use, so an expired or revoked admission can never be renewed silently.
+- `factory/src/generation/submission.ts` is the only service-level path from "admitted" to "submitted": it evaluates every gate, takes ownership inside the project ledger lock, submits at most once, persists the task id before polling, and parks an uncertain outcome as `unknown-submission-state`/`uncertain` without releasing it. `LIVE_PROVIDER_EXECUTION_GRANTED` is `false`, so a live grant is refused before ownership is taken.
+- `factory/src/generation/preflight.ts` reports `technicalReadiness`, `policyAdmission`, `budgetReservation`, `referenceDisclosure`, `liveExecutionAuthorization` and `submissionState` as independent gates; `submissionAuthorized` is derived from all of them and is false in this phase.
+- `createProviderHttpTransport` in `factory/src/generation/transport.ts` bridges the adapter to the validated live transport and supplies the closed authorization-host list, so an adapter cannot widen where a credential may be sent.
+- `factory/scripts/seed-pilot-workspace.mjs` and `factory/scripts/verify-pilot-admission.mjs` implement the acceptance suite: ordinary P0 refusals, admission binding and revocation, one-shot ownership under two operating-system processes, the fake-provider lifecycle to a real rendered MP4, and the transport wiring against a controlled local HTTPS server.
+
 ## 10. Renderers and project scene modules
 
 | Renderer | Status | Notes |

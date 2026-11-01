@@ -29,6 +29,8 @@
     "provider:verify": "npm run build && node factory/scripts/verify-provider-output.mjs",
     "golive:seed": "npm run build && node factory/scripts/seed-golive-workspace.mjs",
     "golive:verify": "npm run build && node factory/scripts/verify-golive-readiness.mjs",
+    "pilot:seed": "npm run build && node factory/scripts/seed-pilot-workspace.mjs",
+    "pilot:verify": "npm run build && node factory/scripts/verify-pilot-admission.mjs",
     "render:project": "npm run build && node factory/scripts/render-project.mjs",
     "verify:modules": "npm run build && node factory/scripts/verify-module-render.mjs",
     "audit:git": "npm run build && node factory/scripts/audit-git.mjs",

@@ -164,6 +164,11 @@ The folder name must equal `projectId`. The loader reads only `project.json` and
 | `render` | h264 / yuv420p / bt709 and png or jpeg frame capture |
 | assets | unique id, kind, relative path, hash, source, rights, approval |
 
+The three `permissions` flags are the P0 default-deny boundary and are rejected by
+`validateProjectConfig` when they differ. There is no project-level pilot mode: a
+reviewed pilot admission lives in `generation/pilot-admission.json` and is evaluated
+only at the submission boundary, so it never changes what a project may declare.
+
 ## 3. Duration policy
 
 `durationInFrames = policy(audio.durationSeconds * output.fps)`

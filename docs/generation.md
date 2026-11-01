@@ -22,6 +22,7 @@ generate real-song production assets.
 <project>/generation/
   jobs.json               versioned generation jobs
   permissions.json        per-job cost/network/upload authorization records
+  pilot-admission.json    reviewed, single-use pilot admissions (see §19)
   outputs/<jobId>/        retrieved provider bytes (never overwritten)
   outputs/<jobId>/normalized/  derived compatibility copies
   staging/<jobId>/        validated copy that intake points at
@@ -482,10 +483,22 @@ remaining budget, the submission limit, capability compliance, transport readine
 credential presence (never the value), requirement currency and whether the job is
 already submitted.
 
-A passing report reads `READY FOR SEPARATELY AUTHORIZED PILOT`. It never reads
-`LIVE PROVIDER VERIFIED`, always states `liveExecution: NOT_GRANTED` and
-`submissionAuthorized: false`, and reports the project permission flags as a separate
-policy gate that the engine currently forbids opening.
+The report exposes six independent gates:
+
+| Field | Values | Meaning |
+| --- | --- | --- |
+| `technicalReadiness` | `READY` / `BLOCKED` | every technical precondition, nothing about permission |
+| `policyAdmission` | `DENIED_P0` / `PENDING` / `ADMITTED_FOR_PILOT` / `REFUSED` | project policy plus pilot admission |
+| `budgetReservation` | `ACTIVE` / `MISSING` / `UNCERTAIN` | whether this job holds an open reservation |
+| `referenceDisclosure` | `NOT_REQUIRED` / `AUTHORIZED` / `PENDING` / `DENIED` | whether references may leave the machine |
+| `liveExecutionAuthorization` | `NOT_GRANTED` | the phase boundary; no code path produces `GRANTED` |
+| `submissionState` | `NOT-SUBMITTED` / `ALREADY-SUBMITTED` / `UNCERTAIN` / `CONSUMED` | where the job stands |
+
+`submissionAuthorized` is derived from all six and is therefore false in this phase,
+even for a fully reviewed pilot. `liveExecution` remains the literal `NOT_GRANTED`,
+and a passing technical result reads `READY FOR SEPARATELY AUTHORIZED PILOT`, never
+`LIVE PROVIDER VERIFIED`. `policyGates` still reports the three project permission
+flags and states that a pilot admission never changes them.
 
 ## 18. Go-live acceptance
 
@@ -505,7 +518,149 @@ and a set of recorded fixtures).
 - **E** live refusal, unsupported model, duplicate submission, missing authorization,
   cross-project stage, corrupt media, stale requirement fingerprint.
 
-## 19. Limitations
+## 18b. Pilot admission acceptance
+
+`npm run pilot:seed` creates four synthetic projects in a fresh external workspace:
+`synthetic-pilot-ordinary-demo` (ordinary P0 project), `synthetic-pilot-scope-demo`
+(one scoped pilot job and a second prepared job), `synthetic-pilot-concurrency-demo`
+(two jobs) and `synthetic-pilot-render-demo` (recorded fixtures and a reference
+image).
+
+`npm run pilot:verify` runs 54 checks:
+
+- **A** the ordinary project still rejects `externalGeneration`, `localOnly: false`
+  and `allowNetwork: true`; `submit-live` is refused; the shipped constant is false;
+- **B** the admission binds the exact scope, an unreviewed admission is `PENDING`, a
+  reviewed one is `ADMITTED_FOR_PILOT`, preflight separates the six gates, `pilot-submit`
+  refuses without consuming, stale pricing and an exhausted budget block it, a foreign
+  admission document and a linked write destination are refused, and a failed provider
+  task produces nothing;
+- **C** `DENIED_P0` for a job with no admission, two operating-system processes
+  racing one admission (exactly one submission), expiry, revocation, an unauthorized
+  reference and an uncertain submission that is never retried;
+- **D** the full fake-provider lifecycle: submission, durable task id, polling,
+  retrieval of real bytes, normalization, pending intake, review, compilation and a
+  real 48-frame MP4 with decoded frames and a soundtrack;
+- **F** the real adapter and the real secure transport against a controlled local
+  HTTPS server, plus the same transport refusing every request while the gate is
+  closed;
+- **E** wrong project, wrong job, unsupported model, missing credential, changed
+  reference hash, conflicting task id, consumed admission review, new storyboard
+  revision and changed requirement fingerprint.
+
+## 19. Pilot policy admission and one-shot execution
+
+The P0 project policy is unchanged: `permissions.externalGeneration` must be `false`,
+`localOnly` must be `true`, `allowNetwork` must be `false`, and `validateProjectConfig`
+rejects anything else. A pilot admission is **not** a project mode and cannot be
+expressed in `project.json`.
+
+`generation/pilot-admission.json` holds reviewed, single-use admissions. Two designs
+were possible: teach the project validator about pilot values, or keep the validator
+untouched and evaluate an overlay at the submission boundary. The overlay was chosen
+because it leaves the P0 negative tests byte-identical and makes "may this project do
+external work?" independent of any runtime input. A data file alone is never
+sufficient: the record is parsed with a closed key allowlist and every gate is
+re-evaluated at the boundary.
+
+### 19.1 Record
+
+An admission binds one pilot id to one project, job, requirement id and fingerprint,
+storyboard revision, provider, model, operation, output profile, pricing snapshot
+identity, maximum estimated cost, authorized spend ceiling, exactly one submission,
+and an exact reference set with a per-reference `uploadAuthorized` decision. It also
+carries an admission revision, `approvalState` (`proposed` / `approved` / `denied` /
+`revoked`), `expiresAt`, the `consumption` block (`unconsumed` / `consumed` /
+`uncertain`, submission key, task id) and operator notes.
+
+The record must not contain credentials, bearer tokens, signed URLs, raw payloads,
+private absolute paths, audio or lyrics. `parsePilotAdmissionDocument` rejects those
+keys and path-like or signed values structurally, so a later field cannot introduce
+them, and a malformed document fails closed instead of being read as "no admission".
+
+A pilot id is single-use for its whole lifetime: a new attempt needs a new id, so an
+expired or revoked admission can never be silently renewed.
+
+### 19.2 Staleness
+
+The admission is refused with a stable code when the project, job, requirement id or
+fingerprint, storyboard revision or approval, provider, model, operation, output
+profile, reference set or hash, pricing snapshot, spend ceiling, expiry, approval
+state or consumption state no longer matches. Nothing recomputes or extends an
+admission automatically.
+
+### 19.3 Gate evaluation
+
+`evaluatePilotAdmission` is pure and reports `DENIED_P0` (no admission names the job),
+`PENDING` (proposed/incomplete), `ADMITTED_FOR_PILOT` (every gate passes) or `REFUSED`
+(a binding, budget, expiry, revocation or consumption check failed), together with a
+per-gate `checks` table and human-readable blockers.
+
+An admission is local operational evidence, **not** authenticated approval and not
+cryptographic identity verification. Nothing in the engine proves who reviewed it.
+
+### 19.4 One-shot ownership and submission
+
+`runPilotSubmission` is the only service-level path from "admitted" to "submitted". It
+evaluates every gate, then takes ownership inside the project ledger lock
+(`consumePilotAdmission`), so two local processes can never both consume one
+admission, and a job can never hold two reservations. The losing process refuses
+before any provider call.
+
+Order inside the service: resolve the explicitly named project/job/pilot → validate
+the current storyboard and requirement → evaluate the admission → validate provider
+capability → validate pricing → validate the per-job permission → read the ledger and
+reservation → validate disclosure → validate credential presence (boolean only) →
+validate the transport policy → refuse an already-submitted job → recheck expiry →
+consume ownership → submit once → persist the task id immediately.
+
+`LIVE_PROVIDER_EXECUTION_GRANTED` is `false`, so a live grant is refused at the
+`live-authorization` stage **before** ownership is taken: the admission stays
+`unconsumed` and nothing is charged. Only an injected `simulated` grant with a
+simulated driver proceeds, which is how the acceptance suite and
+`generation pilot-simulate` run the full lifecycle without a provider.
+
+A failure after the request may have been transmitted parks the job as
+`unknown-submission-state` and the admission as `uncertain`; both stay exposed, and no
+retry is permitted until an operator reconciles the task. Only a failure decided
+before a socket is opened returns an admission to `unconsumed`, and that closed set
+lives in `submissionFailureTransmitted`.
+
+`resumePilotSubmission` resumes status polling and retrieval from the persisted task
+id, never submits, and preserves the provider bytes.
+
+### 19.5 CLI
+
+```text
+npm run generation -- pilot-propose --project <id> --job <JOB> --pilot <ID> [--max-estimated-cost <usd>] [--spend-ceiling <usd>] [--expires-at <iso>] [--expires-in-hours <h>] [--upload <ASSET,...>] --notes "<review>"
+npm run generation -- pilot-diff --project <id> --job <JOB> --pilot <ID>
+npm run generation -- pilot-validate --project <id> --job <JOB> --pilot <ID> [--snapshot <project-relative.json>]
+npm run generation -- pilot-review --project <id> --job <JOB> --pilot <ID> --decision <approve|deny> --notes "<review>"
+npm run generation -- pilot-revoke --project <id> --job <JOB> --pilot <ID> --notes "<why>"
+npm run generation -- pilot-inspect --project <id> --job <JOB> [--pilot <ID>]
+npm run generation -- pilot-request --project <id> --job <JOB> [--pilot <ID>]
+npm run generation -- pilot-submit --project <id> --job <JOB> [--pilot <ID>]        # always refused
+npm run generation -- pilot-simulate --project <id> --job <JOB> --pilot <ID> --fixtures <project-relative.json>
+```
+
+Every mutating command names one project and one job; no command authorizes all
+pending work. `pilot-review --decision approve` refuses while a binding mismatch or a
+reference-disclosure blocker remains. `pilot-submit` reports the exact blockers and
+exits non-zero without consuming the admission. `pilot-simulate` replays recorded
+responses through an injected transport, polls the task, retrieves the bytes and
+leaves them pending intake.
+
+### 19.6 Transport wiring
+
+`createProviderHttpTransport` bridges the provider adapter's `HttpTransport` to the
+validated live transport and supplies the closed authorization-host list from the
+endpoint policy, so an adapter can never widen where a credential may be sent. The
+bridge performs no network work of its own and is inert while the live transport
+refuses. The acceptance suite drives it against a controlled local HTTPS server with a
+generated CA and proves the same transport refuses every request while the gate is
+closed.
+
+## 20. Limitations
 
 - Offline output is deterministic synthetic media, not AI generation, and no live
   provider behaviour has been observed.
@@ -530,3 +685,12 @@ and a set of recorded fixtures).
   provider account.
 - `transparent-layer` remains an image subtype; no provider in the manifest declares
   alpha.
+- A pilot admission is local operational evidence. It does not authenticate the
+  approver, does not bound spend at the provider, and does not survive a change to the
+  project, job, requirement, storyboard, model, operation, output profile, reference
+  hash, price or expiry.
+- `LIVE_PROVIDER_EXECUTION` remains `NOT_GRANTED`. No live provider request, payment
+  or private-reference upload was performed, so nothing in this document is evidence
+  of live provider behaviour, billing or acceptance.
+- The pilot concurrency guarantee is a single-host filesystem lock. It does not extend
+  to two machines sharing a project over a network filesystem.

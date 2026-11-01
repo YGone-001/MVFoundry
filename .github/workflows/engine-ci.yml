@@ -105,6 +105,22 @@ jobs:
         run: npm run golive:seed
       - name: Verify go-live readiness, spend controls and transport policy
         run: npm run golive:verify
+      - name: Ensure openssl for the controlled local TLS server
+        shell: pwsh
+        run: |
+          if (-not (Get-Command openssl -ErrorAction SilentlyContinue)) {
+            $candidates = @(
+              (Join-Path $env:ProgramFiles 'Git\usr\bin'),
+              (Join-Path ${env:ProgramFiles(x86)} 'Git\usr\bin')
+            ) | Where-Object { Test-Path (Join-Path $_ 'openssl.exe') }
+            if ($candidates.Count -eq 0) { throw 'openssl is unavailable; the pilot transport acceptance leg cannot run' }
+            Add-Content -Path $env:GITHUB_PATH -Value $candidates[0]
+          }
+          & openssl version
+      - name: Seed pilot admission workspace
+        run: npm run pilot:seed
+      - name: Verify pilot admission, one-shot execution and a real render
+        run: npm run pilot:verify
       - name: Publication audit
         run: npm run audit:publication
       - name: Git media audit
