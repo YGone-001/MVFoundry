@@ -34,6 +34,8 @@
     "mv:seed": "npm run build && node factory/scripts/seed-mv-production.mjs",
     "mv:produce": "npm run build && node factory/scripts/produce-mv.mjs",
     "mv:verify": "npm run build && node factory/scripts/verify-mv-production.mjs",
+    "mv:seed-b": "npm run build && node factory/scripts/seed-mv-project-b.mjs",
+    "mv:verify-b": "npm run build && node factory/scripts/verify-mv-project-b.mjs",
     "render:project": "npm run build && node factory/scripts/render-project.mjs",
     "verify:modules": "npm run build && node factory/scripts/verify-module-render.mjs",
     "audit:git": "npm run build && node factory/scripts/audit-git.mjs",

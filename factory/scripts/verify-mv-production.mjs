@@ -63,10 +63,10 @@ if (args.includes('--produce')) {
   }
   for (const step of [
     ['analyze-beats'],
-    ['approve-beats', '--interpretation', 'as-estimated', '--acknowledge-ambiguity', '--notes', 'Reviewed: the estimate is within a frame of the generated 120 BPM score; manual anchors remain authoritative.'],
-    ['plan'],
+    ['approve-beats', '--interpretation', 'as-estimated', '--acknowledge-ambiguity', '--new-revision', '--notes', 'Reviewed: the estimate is within a frame of the generated 120 BPM score; manual anchors remain authoritative.'],
+    ['plan', '--new-revision'],
     ['approve-plan'],
-    ['storyboard'],
+    ['storyboard', '--new-revision'],
     ['approve-storyboard'],
   ]) {
     // The preproduction CLI takes the command first, then the project selector.
@@ -78,7 +78,7 @@ if (args.includes('--produce')) {
     encoding: 'utf8',
     windowsHide: true,
   });
-  runStep('produce-mv.mjs', ['--project', projectId, ...(profile === 'ci' ? ['--profile', 'ci'] : []), '--retry', '2']);
+  runStep('produce-mv.mjs', ['--project', projectId, '--stage-fixture-assets', ...(profile === 'ci' ? ['--profile', 'ci'] : []), '--retry', '2']);
 }
 
 const plan = readJson(path.join(projectDir, 'production', 'plan.json'));
@@ -278,6 +278,49 @@ record('A8: the rendered soundtrack is the approved master audio',
   existsSync(audioAbsolute) && evidence?.audio?.sha256 === sha(audioAbsolute) &&
     Math.abs(Number(masterAudio?.duration) - evidence.audio.declaredDurationSeconds) <= 0.1,
   {audio: evidence?.audio?.sha256, duration: masterAudio?.duration});
+
+// --- Timeline regression: section boundaries and renderer mapping ---
+// These assertions detect divergent section boundaries and renderer mappings
+// between the score, the annotations, the storyboard and the compiled
+// candidate. They are the regression guard for the P1-F-A evidence
+// discrepancy, where a report table disagreed with the actual source.
+
+const scoreSections = plan.score?.sections ?? [];
+const storyboardForRegression = readJson(path.join(projectDir, 'preproduction', 'storyboard.json'));
+const storyboardShots = storyboardForRegression.chapters.flatMap((c) => c.shots);
+
+record('A9: storyboard section boundaries match the score section boundaries',
+  scoreSections.length > 0 &&
+    storyboardForRegression.chapters.length === scoreSections.length &&
+    storyboardForRegression.chapters.every((chapter, index) => {
+      const score = scoreSections[index];
+      return score && chapter.startFrame === Math.round(score.startSeconds * fps) &&
+        chapter.endFrame === Math.round(score.endSeconds * fps);
+    }),
+  {
+    storyboard: storyboardForRegression.chapters.map((c) => `${c.startFrame}-${c.endFrame}`),
+    score: scoreSections.map((s) => `${Math.round(s.startSeconds * fps)}-${Math.round(s.endSeconds * fps)}`),
+  });
+
+record('A10: every storyboard shot renderer matches its plan directive',
+  storyboardShots.every((shot, index) => {
+    const planned = plan.shots?.[index];
+    return planned && shot.renderer === planned.renderer;
+  }),
+  {
+    storyboard: storyboardShots.map((s) => s.renderer),
+    plan: (plan.shots ?? []).map((s) => s.renderer),
+  });
+
+record('A11: storyboard shot boundaries are contiguous with no gaps or overlaps',
+  storyboardShots.every((shot, index) =>
+    index === 0 ? shot.startFrame === 0 : shot.startFrame === storyboardShots[index - 1].endFrame) &&
+    storyboardShots[storyboardShots.length - 1].endFrame === expectedFrames,
+  {
+    first: storyboardShots[0]?.startFrame,
+    last: storyboardShots[storyboardShots.length - 1]?.endFrame,
+    expected: expectedFrames,
+  });
 
 // ===========================================================================
 // B — timeline and shot-cut verification
@@ -737,13 +780,13 @@ guard('E: negative and recovery controls', () => {
   freshClone('missing-soundtrack');
   rmSync(path.join(cloneDir, 'source', 'audio', 'signal-garden-master.wav'), {force: true});
   record('E1: a missing soundtrack stops production before any render',
-    produce(cloneRoot, ['--skip-assets'], true).exit !== 0, {});
+    produce(cloneRoot, [], true).exit !== 0, {});
 
   // E2 corrupt audio
   freshClone('corrupt-audio');
   writeFileSync(path.join(cloneDir, 'source', 'audio', 'signal-garden-master.wav'), Buffer.alloc(64));
   record('E2: corrupt audio is refused rather than rendered silently',
-    produce(cloneRoot, ['--skip-assets'], true).exit !== 0, {});
+    produce(cloneRoot, [], true).exit !== 0, {});
 
   // E3 unapproved storyboard
   freshClone('draft-storyboard');
@@ -753,7 +796,7 @@ guard('E: negative and recovery controls', () => {
     storyboard.status = 'draft';
     writeFileSync(file, `${JSON.stringify(storyboard, null, 2)}\n`);
   }
-  const draftResult = produce(cloneRoot, ['--skip-assets'], true);
+  const draftResult = produce(cloneRoot, [], true);
   record('E3: an unapproved storyboard blocks production',
     draftResult.exit !== 0 && /approved storyboard/i.test(`${draftResult.stderr}${draftResult.stdout}`), {});
 
@@ -765,7 +808,7 @@ guard('E: negative and recovery controls', () => {
     intake.records[0].fingerprint = 'stale-fingerprint';
     writeFileSync(file, `${JSON.stringify(intake, null, 2)}\n`);
   }
-  const staleResult = produce(cloneRoot, ['--skip-assets'], true);
+  const staleResult = produce(cloneRoot, [], true);
   record('E4: a stale asset requirement fingerprint blocks production',
     staleResult.exit !== 0 && /stale/i.test(`${staleResult.stderr}${staleResult.stdout}`), {});
 
@@ -778,7 +821,7 @@ guard('E: negative and recovery controls', () => {
     writeFileSync(file, `${JSON.stringify(intake, null, 2)}\n`);
   }
   record('E5: a pending or rejected asset cannot reach the timeline',
-    produce(cloneRoot, ['--skip-assets'], true).exit !== 0, {});
+    produce(cloneRoot, [], true).exit !== 0, {});
 
   // E6 changed source hash
   freshClone('changed-hash');
@@ -787,7 +830,7 @@ guard('E: negative and recovery controls', () => {
     const file = path.join(cloneDir, record0.path);
     writeFileSync(file, Buffer.concat([readFileSync(file), Buffer.from([0])]));
   }
-  const hashResult = produce(cloneRoot, ['--skip-assets'], true);
+  const hashResult = produce(cloneRoot, [], true);
   record('E6: changing a bound asset byte is detected before rendering',
     hashResult.exit !== 0 && /changed on disk|hash/i.test(`${hashResult.stderr}${hashResult.stdout}`), {});
 
@@ -795,7 +838,7 @@ guard('E: negative and recovery controls', () => {
   freshClone('broken-module');
   writeFileSync(path.join(cloneDir, 'scenes', 'garden-light.ts'), 'export default {broken: true};\n');
   record('E7: a tampered project scene module fails closed',
-    produce(cloneRoot, ['--skip-assets'], true).exit !== 0, {});
+    produce(cloneRoot, [], true).exit !== 0, {});
 
   // E8 insufficient source-video duration
   freshClone('short-clip');
@@ -867,7 +910,7 @@ guard('E: negative and recovery controls', () => {
     candidate.chapters[0].shots[0].endFrame -= 12;
     writeFileSync(file, `${JSON.stringify(candidate, null, 2)}\n`);
   }
-  const gap = produce(cloneRoot, ['--skip-assets'], true);
+  const gap = produce(cloneRoot, [], true);
   record('E12: a candidate with a coverage gap cannot be produced',
     gap.exit !== 0, {});
 

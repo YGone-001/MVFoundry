@@ -250,6 +250,16 @@ Do not treat plans, prior reports or user summaries as proof of the current file
 - CI runs `npm run mv:seed` and `npm run mv:verify -- --profile ci --produce`: the same approved storyboard and full 1440-frame duration at half resolution, documented as the CI profile. A short smoke render may be added but never replaces the full-duration verification.
 - Generated audio, clips, layers, renders, contact sheets and review packages stay in the external workspace and are never committed.
 
+### Generic MV production (P1-F-B)
+
+- `factory/scripts/mv-project.mjs init` creates a new project in an authorized external workspace from explicit inputs (project id, output profile, one selected local audio source with declared provenance and rights). It validates the project id, rejects collisions and engine-root destinations, verifies the audio format and decoded duration, copies the source byte-for-byte, and records SHA256 plus the rights assertion. A user-declared rights assertion is an operational record, not independent verification of copyright ownership.
+- `factory/scripts/mv-project.mjs import-audio` imports or explicitly replaces the master audio. Re-importing an identical source is idempotent; a changed hash requires `--replace` and never silently rewrites approved timing.
+- `produce-mv.mjs` is project-independent: it reads the project's actual state, validates the approved storyboard and every bound asset hash, compiles a candidate, renders the full timeline and inspects the output. It never approves an asset, asserts rights, substitutes a file or generates anything. Missing or unreviewed assets produce a structured `BLOCKED` result with precise blockers.
+- The Signal Garden fixture asset map (`support/mv-assets.mjs`) is synthetic-rehearsal-only and is reached only via the explicit `--stage-fixture-assets` flag. A normal production run never touches it.
+- Production idempotency: an existing accepted output for the same storyboard revision and asset hashes is not silently overwritten; `--rerender` or a new revision is required.
+- `seed-mv-project-b.mjs` + `verify-mv-project-b.mjs` create and accept an independent second project ("Prism Transit") with different duration (50s), meter (5/4), tempo changes, nonuniform shots, 4:3 output and a different renderer distribution — proving the engine has no hardcoded project assumptions.
+- Timeline regression assertions (A9–A11) in `verify-mv-production.mjs` detect divergent section boundaries and renderer mappings between score, annotations, storyboard and candidate.
+
 ### Publication audit
 
 - `security/audit-publication.mjs` supports two evidence modes: `filesystem` (working tree) and `--candidate` (the exact tracked publication set from `git ls-files`).

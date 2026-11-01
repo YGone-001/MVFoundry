@@ -1,13 +1,23 @@
 // Complete-music-video production orchestration.
 //
 // Composes the accepted services rather than reimplementing them: it validates
-// the project, stages and reviews assets through the handoff workflow, compiles
-// the approved storyboard, renders the full duration through the existing
-// render CLI, then inspects the real output before calling anything complete.
+// the project, checks that every requirement already has a reviewed approved
+// asset, compiles the approved storyboard, renders the full duration through
+// the existing render CLI, then inspects the real output before calling
+// anything complete.
+//
+// This command is project-independent. It knows nothing about a project's id,
+// shot identities, requirement ids or media filenames, and it never approves
+// an asset, asserts rights, substitutes a file or generates anything.
 //
 // Usage:
-//   npm run mv:produce -- --project synthetic-mv-signal-garden
-//   node factory/scripts/produce-mv.mjs --project <id> --workspace <root> [--profile master|ci] [--skip-assets] [--retry N]
+//   npm run mv:produce -- --project my-song
+//   node factory/scripts/produce-mv.mjs --project <id> --workspace <root> \
+//     [--profile master|ci] [--rerender] [--retry N] [--out <name>]
+//
+// Synthetic fixture staging is NOT part of the production path. The Signal
+// Garden rehearsal passes --stage-fixture-assets explicitly; a normal project
+// supplies its assets through the handoff workflow and a human review.
 //
 // Nothing here contacts a provider, spends credits or writes project.json.
 
@@ -17,7 +27,6 @@ import {existsSync, readFileSync, statSync, writeFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {stageAssets} from './support/mv-assets.mjs';
 
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -76,11 +85,17 @@ if (Math.abs(project.audioMetadata.decodedDurationSeconds - project.config.audio
 log(`audio ok: ${project.config.audio.durationSeconds}s ${audioSha.slice(0, 12)}`);
 
 // ---------------------------------------------------------------------------
-// 2. Asset production and review (unless the caller already ran it)
+// 2. Optional synthetic fixture staging (explicit opt-in only)
 // ---------------------------------------------------------------------------
+//
+// The Signal Garden acceptance script calls this. A normal production run
+// never does: the default path only reads the project's real state and refuses
+// when something is missing or awaiting review.
 
 let assetResult = null;
-if (!hasFlag('skip-assets')) {
+if (hasFlag('stage-fixture-assets')) {
+  const {stageAssets} = await import('./support/mv-assets.mjs');
+  log('fixture asset staging requested explicitly (synthetic acceptance only)');
   assetResult = stageAssets({
     engineRoot: repoRoot,
     workspaceRoot,
@@ -88,35 +103,60 @@ if (!hasFlag('skip-assets')) {
     projectId,
     log,
   });
-  log(`assets ready: ${assetResult.requirements} requirements, ${assetResult.rejected.length} rejected`);
+  log(`fixture assets staged: ${assetResult.requirements} requirements, ${assetResult.rejected.length} rejected`);
 }
 
 // ---------------------------------------------------------------------------
 // 3. Validate the approved storyboard and every bound asset
 // ---------------------------------------------------------------------------
 
-const storyboard = readJson(path.join(project.projectDir, PREPRODUCTION_PATHS.storyboard));
+const blocked = (stage, blockers) => {
+  console.error(JSON.stringify({
+    status: 'BLOCKED',
+    projectId,
+    stage,
+    blockers,
+    note: 'Production refuses to proceed. Resolve every blocker explicitly; nothing is substituted automatically.',
+  }, null, 2));
+  process.exit(3);
+};
+
+const storyboardPath = path.join(project.projectDir, PREPRODUCTION_PATHS.storyboard);
+if (!existsSync(storyboardPath)) {
+  blocked('storyboard', ['no storyboard exists for this project; run the preproduction planning chain first']);
+}
+const storyboard = readJson(storyboardPath);
 if (storyboard.status !== 'approved') {
-  throw new Error(`Storyboard revision ${storyboard.revision} is ${storyboard.status}; an approved storyboard is required`);
+  blocked('storyboard', [`storyboard revision ${storyboard.revision} is ${storyboard.status}; an approved storyboard is required`]);
 }
 const requirements = storyboard.assetRequirements ?? [];
 const intake = readOptionalProjectJson(project.projectDir, PREPRODUCTION_PATHS.assetIntake);
 const intakeRecords = intake?.records ?? [];
 const assetChecks = [];
+const blockers = [];
 for (const requirement of requirements) {
   const record = intakeRecords.find((entry) => entry.requirementId === requirement.id);
-  if (!record) throw new Error(`Requirement ${requirement.id} has no intake record`);
+  if (!record) {
+    blockers.push(`requirement ${requirement.id} (${requirement.kind}) has no intake record: supply an asset and review it`);
+    continue;
+  }
   if (record.review !== 'approved') {
-    throw new Error(`Requirement ${requirement.id} intake is ${record.review}; only approved assets may render`);
+    blockers.push(`requirement ${requirement.id} intake is ${record.review}; only reviewed approved assets may render`);
+    continue;
   }
   if (record.fingerprint !== requirement.fingerprint) {
-    throw new Error(`Requirement ${requirement.id} is stale: fingerprint changed after intake`);
+    blockers.push(`requirement ${requirement.id} is stale: its fingerprint changed after intake`);
+    continue;
   }
-  const absolute = path.join(project.projectDir, record.path);
-  if (!existsSync(absolute)) throw new Error(`Bound asset for ${requirement.id} is missing: ${record.path}`);
-  const current = sha256File(absolute);
+  const absolutePath = path.join(project.projectDir, record.path);
+  if (!existsSync(absolutePath)) {
+    blockers.push(`bound asset for ${requirement.id} is missing: ${record.path}`);
+    continue;
+  }
+  const current = sha256File(absolutePath);
   if (current !== record.sha256) {
-    throw new Error(`Bound asset for ${requirement.id} changed on disk: expected ${record.sha256}, found ${current}`);
+    blockers.push(`bound asset for ${requirement.id} changed on disk: expected ${record.sha256}, found ${current}`);
+    continue;
   }
   assetChecks.push({
     requirementId: requirement.id,
@@ -129,6 +169,9 @@ for (const requirement of requirements) {
     rights: record.rights,
     provenance: record.provenance,
   });
+}
+if (blockers.length > 0) {
+  blocked('assets', blockers);
 }
 log(`storyboard r${storyboard.revision} approved with ${requirements.length} verified assets`);
 
@@ -179,6 +222,33 @@ if (profile === 'ci' && masterWidth > 640) {
 log(`profile ${profile}: ${renderWidth}x${renderHeight} @ ${project.config.output.fps}fps, ${project.durationInFrames} frames`);
 
 // ---------------------------------------------------------------------------
+// 5b. Production idempotency: never silently overwrite an accepted output
+// ---------------------------------------------------------------------------
+
+const outputAbsolute = path.join(project.projectDir, 'renders', outputName);
+const evidenceNameFor = profile === 'ci' ? 'production-evidence-ci.json' : 'production-evidence.json';
+const existingEvidencePath = path.join(project.projectDir, 'reports', evidenceNameFor);
+if (existsSync(outputAbsolute) && existsSync(existingEvidencePath) && !hasFlag('rerender')) {
+  const previous = readJson(existingEvidencePath);
+  const sameRevision = previous.storyboard?.revision === storyboard.revision;
+  const previousHashes = (previous.assets ?? []).map((entry) => `${entry.requirementId}:${entry.sha256}`).sort();
+  const currentHashes = assetChecks.map((entry) => `${entry.requirementId}:${entry.sha256}`).sort();
+  const sameAssets = JSON.stringify(previousHashes) === JSON.stringify(currentHashes);
+  if (sameRevision && sameAssets) {
+    console.error(JSON.stringify({
+      status: 'ALREADY_COMPLETE',
+      projectId,
+      output: previous.output,
+      storyboardRevision: previous.storyboard?.revision,
+      note: 'An accepted output already exists for this storyboard revision and these exact asset hashes. Pass --rerender to replace it, or a new storyboard revision to change it.',
+      provenance: {evidence: `reports/${evidenceNameFor}`, sha256: previous.output?.sha256 ?? null},
+    }, null, 2));
+    process.exit(0);
+  }
+  log('existing output is stale (storyboard or asset hashes changed); a fresh render will replace it');
+}
+
+// ---------------------------------------------------------------------------
 // 6. Render the full duration through the accepted render CLI
 // ---------------------------------------------------------------------------
 
@@ -216,7 +286,6 @@ if (renderExit !== 0) {
 // 7. Inspect the actual output — an exit code is not acceptance
 // ---------------------------------------------------------------------------
 
-const outputAbsolute = path.join(project.projectDir, 'renders', outputName);
 if (!existsSync(outputAbsolute)) throw new Error(`Render reported success but ${outputName} is missing`);
 const probe = JSON.parse(
   execFileSync('ffprobe', ['-v', 'error', '-print_format', 'json', '-show_streams', '-show_format', outputAbsolute], {
@@ -325,8 +394,7 @@ const evidence = {
 };
 
 const reportsDir = ensureSafeDirectory(boundary, path.join(boundary.projectRoot, 'reports'), 'project');
-const evidenceName = profile === 'ci' ? 'production-evidence-ci.json' : 'production-evidence.json';
-const evidencePath = assertSafePath(boundary, path.join(reportsDir, evidenceName), {expect: 'file', subtree: 'project'});
+const evidencePath = assertSafePath(boundary, path.join(reportsDir, evidenceNameFor), {expect: 'file', subtree: 'project'});
 writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`);
 
 console.log(JSON.stringify({

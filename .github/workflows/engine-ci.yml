@@ -125,6 +125,10 @@ jobs:
         run: npm run mv:seed
       - name: Produce and verify the complete synthetic music video
         run: npm run mv:verify -- --profile ci --produce
+      - name: Seed independent project workspace
+        run: npm run mv:seed-b
+      - name: Verify independent project production and acceptance
+        run: npm run mv:verify-b -- --profile ci --produce
       - name: Publication audit
         run: npm run audit:publication
       - name: Git media audit

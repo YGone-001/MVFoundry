@@ -1,4 +1,16 @@
-// Asset production and review for the complete-MV rehearsal.
+// SYNTHETIC REHEARSAL FIXTURE — Signal Garden only.
+//
+// This module is the hardcoded asset map and automatic review choreography for
+// the built-in `synthetic-mv-signal-garden` acceptance project. It is NOT part
+// of the production engine and must never be reached by a normal `mv:produce`
+// run: `produce-mv.mjs` imports it only when the caller passes the explicit
+// `--stage-fixture-assets` flag, which the Signal Garden acceptance script
+// does and nothing else should.
+//
+// For a real project, assets are supplied through the accepted handoff
+// workflow (`preproduction.mjs attach-asset` / `review-asset`) and reviewed by
+// a human. Requirement ids matching this map are NOT authorization to reuse
+// fixture behaviour.
 //
 // Every asset travels the accepted handoff workflow: generation or local
 // production, technical validation, pending intake, an explicit reviewer

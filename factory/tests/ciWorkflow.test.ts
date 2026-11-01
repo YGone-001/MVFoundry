@@ -103,6 +103,8 @@ test('G12: workflow runs the required engine and security commands', () => {
     'npm run pilot:verify',
     'npm run mv:seed',
     'npm run mv:verify',
+    'npm run mv:seed-b',
+    'npm run mv:verify-b',
     'npm run audit:publication',
     'npm run audit:git',
   ]) {
@@ -168,6 +170,8 @@ test('G12: workspace is initialized from RUNNER_TEMP via GITHUB_ENV before seedi
   const pilotVerifyIndex = names.indexOf('Verify pilot admission, one-shot execution and a real render');
   const mvSeedIndex = names.indexOf('Seed complete music-video workspace');
   const mvVerifyIndex = names.indexOf('Produce and verify the complete synthetic music video');
+  const mvSeedBIndex = names.indexOf('Seed independent project workspace');
+  const mvVerifyBIndex = names.indexOf('Verify independent project production and acceptance');
   assert.ok(provisionIndex >= 0 && ffmpegIndex > provisionIndex, 'FFmpeg provisioning must precede verification');
   assert.ok(typecheckIndex > ffmpegIndex, 'FFmpeg must be provisioned and verified before typecheck');
   assert.ok(testIndex > typecheckIndex, 'tests must follow typecheck');
@@ -195,11 +199,14 @@ test('G12: workspace is initialized from RUNNER_TEMP via GITHUB_ENV before seedi
   assert.ok(pilotVerifyIndex > pilotSeedIndex, 'pilot verification must follow its seeding');
   assert.ok(mvSeedIndex > pilotVerifyIndex, 'music-video seeding must follow pilot verification');
   assert.ok(mvVerifyIndex > mvSeedIndex, 'music-video verification must follow its seeding');
-  assert.ok(names.indexOf('Publication audit') > mvVerifyIndex, 'publication audit must follow music-video verification');
+  assert.ok(mvSeedBIndex > mvVerifyIndex, 'independent project seeding must follow the Signal Garden verification');
+  assert.ok(mvVerifyBIndex > mvSeedBIndex, 'independent project verification must follow its seeding');
+  assert.ok(names.indexOf('Publication audit') > mvVerifyBIndex, 'publication audit must follow independent project verification');
   assert.ok(names.indexOf('Git media audit') > mvVerifyIndex, 'Git media audit must follow music-video verification');
   assert.ok(!names.includes('Record media/audio render limitation'), 'audio acceptance must not be skippable');
   assert.match(workflow, /npm run pilot:verify/);
   assert.match(workflow, /npm run mv:verify -- --profile ci --produce/);
+  assert.match(workflow, /npm run mv:verify-b -- --profile ci --produce/);
   assert.doesNotMatch(workflow, /continue-on-error:\s*true/, 'no acceptance step may be allowed to fail softly');
 
   const provision = steps[provisionIndex];

@@ -176,6 +176,13 @@ Preproduction is a local planning layer, not semantic music understanding and no
 - `factory/scripts/verify-mv-production.mjs` verifies the rendered file at the pixel and sample level, writes the human review package, and runs the negative/recovery matrix on disposable clones.
 - `compile` validates a candidate against engine-registered renderer kinds only; project module kinds are validated separately, so a project with a scene module can compile and render at all.
 
+## 9f. Generic MV production (P1-F-B)
+
+- `factory/scripts/mv-project.mjs` provides `init` and `import-audio` for creating independent projects from explicit inputs. Every source path is named by the caller; nothing scans folders or imports automatically. The source is copied byte-for-byte and its hash, format and decoded duration are recorded alongside the user-declared provenance and rights.
+- `produce-mv.mjs` is the project-independent production path. It validates the current soundtrack, the approved storyboard, every bound asset hash and the compiled candidate, then renders and inspects the output. It returns a structured `BLOCKED` result when anything is missing or awaiting review — it never auto-approves, substitutes or generates.
+- The Signal Garden fixture staging (`support/mv-assets.mjs`) is isolated behind `--stage-fixture-assets` and is only used by the synthetic acceptance scripts.
+- `seed-mv-project-b.mjs` / `verify-mv-project-b.mjs` create and accept "Prism Transit", an independent 50-second 5/4 project with tempo changes, nonuniform shots and 4:3 output.
+
 ## 10. Renderers and project scene modules
 
 | Renderer | Status | Notes |
