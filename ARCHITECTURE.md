@@ -167,6 +167,15 @@ Preproduction is a local planning layer, not semantic music understanding and no
 - `createProviderHttpTransport` in `factory/src/generation/transport.ts` bridges the adapter to the validated live transport and supplies the closed authorization-host list, so an adapter cannot widen where a credential may be sent.
 - `factory/scripts/seed-pilot-workspace.mjs` and `factory/scripts/verify-pilot-admission.mjs` implement the acceptance suite: ordinary P0 refusals, admission binding and revocation, one-shot ownership under two operating-system processes, the fake-provider lifecycle to a real rendered MP4, and the transport wiring against a controlled local HTTPS server.
 
+## 9e. Complete music-video production
+
+- `factory/scripts/support/synthetic-score.mjs` synthesises a deterministic 60-second score (six sections, seeded noise, explicit kick/snare markers). The score is the duration authority, and its section times are exact evidence rather than an estimate.
+- `factory/scripts/seed-mv-production.mjs` builds `synthetic-mv-signal-garden`: project config, approved annotations, creative brief with one directive per shot, continuity registry, a project-local TS scene module, and synthetic clips/layers/reference media. It writes only into an external workspace.
+- `factory/scripts/support/mv-assets.mjs` delivers every requirement through the accepted handoff workflow (offline generation or local production, technical validation, pending intake, explicit review, binding). The rejection scenario runs last so the compiler must refuse with exactly one requirement missing.
+- `factory/scripts/produce-mv.mjs` is the production orchestration: validate audio and assets, compile the approved candidate, render the whole range through the existing render CLI, inspect the output, and write project-local evidence. It never writes `project.json` and never touches a provider.
+- `factory/scripts/verify-mv-production.mjs` verifies the rendered file at the pixel and sample level, writes the human review package, and runs the negative/recovery matrix on disposable clones.
+- `compile` validates a candidate against engine-registered renderer kinds only; project module kinds are validated separately, so a project with a scene module can compile and render at all.
+
 ## 10. Renderers and project scene modules
 
 | Renderer | Status | Notes |

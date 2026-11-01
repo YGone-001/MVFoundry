@@ -173,3 +173,81 @@ export const writeIncompatibleClip = (file, seconds, palette) => {
   ]);
   ffmpeg(['-display_rotation', '90', '-i', vfr, '-c', 'copy', file]);
 };
+
+/** RGBA PNG where the caller decides every pixel (used for transparent layers). */
+export const writeAlphaPng = (file, width, height, paint) => {
+  const rowSize = width * 4 + 1;
+  const raw = Buffer.alloc(rowSize * height);
+  for (let y = 0; y < height; y++) {
+    const row = y * rowSize;
+    raw[row] = 0;
+    for (let x = 0; x < width; x++) {
+      const pixel = paint(x, y, width, height);
+      const index = row + 1 + x * 4;
+      raw[index] = pixel[0];
+      raw[index + 1] = pixel[1];
+      raw[index + 2] = pixel[2];
+      raw[index + 3] = pixel[3];
+    }
+  }
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 6;
+  mkdirSync(path.dirname(file), {recursive: true});
+  writeFileSync(
+    file,
+    Buffer.concat([
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      pngChunk('IHDR', header),
+      pngChunk('IDAT', deflateSync(raw, {level: 6})),
+      pngChunk('IEND', Buffer.alloc(0)),
+    ]),
+  );
+};
+
+/**
+ * A constant-frame-rate synthetic clip composed of rising light columns over a
+ * base colour, with a slow band sweep. The columns give the clip a readable
+ * "signal garden" identity instead of a flat colour field, and every parameter
+ * is fixed so the bytes are deterministic.
+ * `audioTone` embeds a tone to prove the renderer mutes source audio.
+ */
+export const writeMovingClip = (file, {width, height, seconds, fps, from, to, audioTone = null, bandSpeed = 1, columns = 6}) => {
+  const hex = (rgb) => `#${rgb.map((value) => Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, '0')).join('')}`;
+  const args = ['-f', 'lavfi', '-i', `color=c=${hex(from)}:s=${width}x${height}:r=${fps}:d=${seconds}`];
+  if (audioTone !== null) {
+    args.push('-f', 'lavfi', '-i', `sine=frequency=${audioTone}:sample_rate=48000:duration=${seconds}`);
+  }
+  const columnWidth = Math.max(6, Math.round(width / 28));
+  const columnHeight = Math.round(height * 0.72);
+  const filters = [`[0:v]null`];
+  for (let index = 0; index < columns; index++) {
+    const x = Math.round(((index + 0.5) / columns) * width - columnWidth / 2);
+    const speed = 26 + ((index * 13) % 19);
+    const phase = index * 97;
+    // Each column scrolls upward and wraps, so the garden appears to grow.
+    const y = `mod(t*${speed}+${phase}\\,${height + columnHeight})-${columnHeight}`;
+    filters.push(
+      `drawbox=x=${x}:y=${y}:w=${columnWidth}:h=${columnHeight}:color=${hex(to)}@0.42:t=fill`,
+    );
+  }
+  const bandY = `mod(t*${(bandSpeed * height) / 2}\\,${height})`;
+  filters.push(`drawbox=x=0:y=${bandY}:w=${width}:h=${Math.round(height / 5)}:color=${hex(to)}@0.35:t=fill`);
+  filters.push(`format=yuv420p[v]`);
+  args.push('-filter_complex', filters.join(','), '-map', '[v]');
+  if (audioTone !== null) args.push('-map', '1:a', '-c:a', 'aac', '-b:a', '128k');
+  args.push(
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+    '-g', String(Math.max(1, Math.round(fps / 2))),
+    '-pix_fmt', 'yuv420p',
+    '-colorspace', 'bt709', '-color_trc', 'bt709', '-color_primaries', 'bt709',
+    '-r', String(fps),
+    '-movflags', '+faststart',
+    '-t', String(seconds),
+    '-f', 'mp4', file,
+  );
+  mkdirSync(path.dirname(file), {recursive: true});
+  ffmpeg(args);
+};

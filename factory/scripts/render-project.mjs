@@ -197,7 +197,9 @@ try {
       );
     }
     rendered.forEach((name, index) => {
-      renameSync(path.join(frameDir, name), path.join(sequenceDir, `frame-${String(index).padStart(3, '0')}.png`));
+      // Four digits: a 60s master at 24fps is 1440 frames, which a %03d pattern
+      // would silently truncate at frame 999.
+      renameSync(path.join(frameDir, name), path.join(sequenceDir, `frame-${String(index).padStart(4, '0')}.png`));
     });
 
     if (!audioMix) throw new Error('Video rendering requires an authoritative audio mix');
@@ -227,7 +229,7 @@ try {
       '-start_number',
       '0',
       '-i',
-      path.join(sequenceDir, 'frame-%03d.png'),
+      path.join(sequenceDir, 'frame-%04d.png'),
     ];
     if (audioFile) ffmpegArgs.push('-i', audioFile);
     ffmpegArgs.push(

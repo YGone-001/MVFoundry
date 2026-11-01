@@ -411,10 +411,11 @@ export const buildCandidateProject = (input: {
     throw new PreproductionError('Storyboard duration does not match the project');
   }
   verifyUndeclaredAssetBytes(project, [...extraAssets.values()]);
-  const rendererKinds = new Set([
-    ...DEFAULT_SCENE_REGISTRY.kinds(),
-    ...project.sceneModules.map((module) => `project:${module.id}`),
-  ]);
+  // Only engine-registered kinds are "protected" here. The project's own module
+  // kinds are validated by the config validator itself (a module may not shadow
+  // an engine renderer); feeding them in would make every module project collide
+  // with itself and refuse to compile.
+  const rendererKinds = new Set(DEFAULT_SCENE_REGISTRY.kinds());
   validateProjectConfig(candidate, {rendererKinds});
   return candidate;
 };
@@ -483,12 +484,9 @@ export const compileApprovedStoryboard = (
         lyrics: {language: input.lyrics.language, path: input.lyrics.sourcePath},
       }
     : candidate;
-  validateProjectConfig(candidateConfig, {
-    rendererKinds: new Set([
-      ...DEFAULT_SCENE_REGISTRY.kinds(),
-      ...input.project.sceneModules.map((module) => `project:${module.id}`),
-    ]),
-  });
+  // Engine-registered kinds only: the project's module kinds are validated
+  // against `moduleRendererKinds` inside the validator itself.
+  validateProjectConfig(candidateConfig, {rendererKinds: new Set(DEFAULT_SCENE_REGISTRY.kinds())});
   const candidatePath = writeProjectJson(
     input.boundary,
     PREPRODUCTION_PATHS.candidate,

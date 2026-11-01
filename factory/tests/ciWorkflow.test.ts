@@ -101,6 +101,8 @@ test('G12: workflow runs the required engine and security commands', () => {
     'npm run golive:verify',
     'npm run pilot:seed',
     'npm run pilot:verify',
+    'npm run mv:seed',
+    'npm run mv:verify',
     'npm run audit:publication',
     'npm run audit:git',
   ]) {
@@ -108,7 +110,7 @@ test('G12: workflow runs the required engine and security commands', () => {
   }
   assert.match(workflow, /windows-latest/);
   assert.match(workflow, /node-version: 20/);
-  assert.match(workflow, /timeout-minutes: 45/);
+  assert.match(workflow, /timeout-minutes: 60/);
   assert.doesNotMatch(workflow, /steps\.ffmpeg\.outputs\.available/);
   assert.match(workflow, /Verify pinned FFmpeg\/FFprobe and required encoders/);
   assert.match(workflow, /Get-Command ffprobe/);
@@ -164,6 +166,8 @@ test('G12: workspace is initialized from RUNNER_TEMP via GITHUB_ENV before seedi
   const opensslIndex = names.indexOf('Ensure openssl for the controlled local TLS server');
   const pilotSeedIndex = names.indexOf('Seed pilot admission workspace');
   const pilotVerifyIndex = names.indexOf('Verify pilot admission, one-shot execution and a real render');
+  const mvSeedIndex = names.indexOf('Seed complete music-video workspace');
+  const mvVerifyIndex = names.indexOf('Produce and verify the complete synthetic music video');
   assert.ok(provisionIndex >= 0 && ffmpegIndex > provisionIndex, 'FFmpeg provisioning must precede verification');
   assert.ok(typecheckIndex > ffmpegIndex, 'FFmpeg must be provisioned and verified before typecheck');
   assert.ok(testIndex > typecheckIndex, 'tests must follow typecheck');
@@ -189,10 +193,13 @@ test('G12: workspace is initialized from RUNNER_TEMP via GITHUB_ENV before seedi
   assert.ok(opensslIndex > goliveVerifyIndex, 'the TLS tooling check must follow go-live verification');
   assert.ok(pilotSeedIndex > opensslIndex, 'pilot seeding must follow the TLS tooling check');
   assert.ok(pilotVerifyIndex > pilotSeedIndex, 'pilot verification must follow its seeding');
-  assert.ok(names.indexOf('Publication audit') > pilotVerifyIndex, 'publication audit must follow pilot verification');
-  assert.ok(names.indexOf('Git media audit') > pilotVerifyIndex, 'Git media audit must follow pilot verification');
+  assert.ok(mvSeedIndex > pilotVerifyIndex, 'music-video seeding must follow pilot verification');
+  assert.ok(mvVerifyIndex > mvSeedIndex, 'music-video verification must follow its seeding');
+  assert.ok(names.indexOf('Publication audit') > mvVerifyIndex, 'publication audit must follow music-video verification');
+  assert.ok(names.indexOf('Git media audit') > mvVerifyIndex, 'Git media audit must follow music-video verification');
   assert.ok(!names.includes('Record media/audio render limitation'), 'audio acceptance must not be skippable');
   assert.match(workflow, /npm run pilot:verify/);
+  assert.match(workflow, /npm run mv:verify -- --profile ci --produce/);
   assert.doesNotMatch(workflow, /continue-on-error:\s*true/, 'no acceptance step may be allowed to fail softly');
 
   const provision = steps[provisionIndex];

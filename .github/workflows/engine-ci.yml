@@ -13,7 +13,7 @@ jobs:
   windows:
     name: Windows Node 20 filesystem security
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -121,6 +121,10 @@ jobs:
         run: npm run pilot:seed
       - name: Verify pilot admission, one-shot execution and a real render
         run: npm run pilot:verify
+      - name: Seed complete music-video workspace
+        run: npm run mv:seed
+      - name: Produce and verify the complete synthetic music video
+        run: npm run mv:verify -- --profile ci --produce
       - name: Publication audit
         run: npm run audit:publication
       - name: Git media audit

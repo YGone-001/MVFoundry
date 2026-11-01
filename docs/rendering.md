@@ -251,3 +251,36 @@ npm run preproduction -- render-preview --project synthetic-beat-demo --frames 0
 The preview loads `preproduction/project-candidate.json` through the normal loader, stages the same approved audio/assets, builds the master mix, and renders `renders/storyboard-preview.mp4`. The candidate chapters and shots are the actual shot selection used by `renderFrames`. Verify decoded output frame changes at storyboard cuts, the final audio stream, source hashes and a fresh beat analysis of the decoded soundtrack; JSON output alone is not preview evidence. `npm run preproduction:verify` performs these checks for the synthetic projects and reports external evidence.
 
 A storyboard with missing assets returns a blocked compile and never produces a candidate or preview. The lyrics fixture is synthetic; real lyrics remain external and must never be committed.
+
+## Complete production render
+
+`factory/scripts/produce-mv.mjs` turns an approved storyboard into a full-length master. It composes the accepted services rather than replacing them:
+
+```bash
+npm run mv:seed
+npm run preproduction -- analyze-beats --project synthetic-mv-signal-garden
+npm run preproduction -- approve-beats --project synthetic-mv-signal-garden \
+  --interpretation as-estimated --acknowledge-ambiguity --notes "<review>"
+npm run preproduction -- plan --project synthetic-mv-signal-garden
+npm run preproduction -- approve-plan --project synthetic-mv-signal-garden
+npm run preproduction -- storyboard --project synthetic-mv-signal-garden
+npm run preproduction -- approve-storyboard --project synthetic-mv-signal-garden
+npm run mv:produce -- --project synthetic-mv-signal-garden
+npm run mv:verify -- --project synthetic-mv-signal-garden
+```
+
+Order of operations: audio hash and decoded duration, asset staging and review, bound-hash verification, candidate compilation, full-range render, output inspection, project-local evidence.
+
+### Full-duration practicalities
+
+- `render-project.mjs` renders an inclusive frame range and muxes the sliced master mix. A 60-second master at 24 fps is 1440 frames, so the intermediate frame sequence is numbered with four digits (`frame-%04d.png`); a three-digit pattern silently stops at frame 999.
+- The production job keeps the whole range in one invocation so the audio slice, the frame sequence and the encode stay aligned. There is no per-chunk concatenation step to get wrong.
+- Output defaults to `renders/<projectId>-master.mp4`. The CI profile writes `renders/<projectId>-ci-master.mp4` from a candidate whose only change is the output resolution.
+
+### Acceptance is inspection, not exit status
+
+After FFmpeg exits, `produce-mv.mjs` re-probes the file and refuses to call it complete unless the codec, pixel format, dimensions, frame rate, frame count, single audio stream, audio codec and container duration all match the plan. `verify-mv-production.mjs` then decodes pixels and audio: shot boundaries must be visible cuts, motion inside a shot must be smaller than the smallest cut, Video shots must decode to their source clip at the declared in-point, Hybrid shots must show a layer contribution, and the soundtrack must keep its section energy profile and rhythmic markers.
+
+### Retry and recovery
+
+`--retry N` re-runs the render on failure. A retry is safe because it only rebuilds engine-owned cache: the approved sources, the bound assets and `project.json` are never written by the producer. A failed local render consumes no pilot admission and no provider budget, and it never triggers a new generation job.

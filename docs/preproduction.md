@@ -330,7 +330,50 @@ once its assets are approved, without rewriting the approved document. The exist
 project validator, loader, `probeVideo`/`probeLayerPng` and `assertMediaTimelines`
 remain the final authority at render; the engine never fabricates a media reference.
 
-## 13. Limitations
+## 13. Complete synthetic music-video rehearsal
+
+`npm run mv:seed` creates `synthetic-mv-signal-garden` in a disposable external workspace and `npm run mv:verify -- --produce` drives the whole rehearsal. The point is to prove the planning system can carry one finished piece rather than one clip.
+
+### Score
+
+`factory/scripts/support/synthetic-score.mjs` synthesises exactly 60 seconds at 120 BPM in 4/4: six two-to-eight-bar sections (intro, pulse, drive, drift, bloom, resolve) with different instrumentation, plus deterministic metadata (`signal-garden-score.json`) listing section times and every kick and snare. Nothing is sampled; the file is generated from oscillators and a seeded noise generator, so the section boundaries are exact timing evidence.
+
+| Section | Bars | Seconds | Character |
+| --- | --- | --- | --- |
+| intro | 0-2 | 0-4 | pad, single bell, one soft kick |
+| pulse | 2-6 | 4-12 | kick on 1 and 3, bass eighths, arpeggio enters |
+| drive | 6-12 | 12-24 | four-on-the-floor, snare backbeat, sixteenth arpeggio |
+| drift | 12-20 | 24-40 | no kick, wide sustained voicing, higher bell |
+| bloom | 20-26 | 40-52 | densest: octave bass, doubled arpeggio |
+| resolve | 26-30 | 52-60 | final chord, decay to silence |
+
+### Timing
+
+Section anchors are approved manual annotations, and cut cues sit on bar lines (every 96 frames at 24 fps). The beat-grid analyser is still run and approved as `as-estimated` with the ambiguity acknowledged, but the plan reports `timing: manual-anchor`: the estimate is evidence, not authority.
+
+Fifteen shots land on those cuts: one to four per section, each 96 frames, so the storyboard covers `[0, 1440)` with no gap or overlap.
+
+### Shots and renderers
+
+| Family | Shots | Notes |
+| --- | --- | --- |
+| `layered-canvas` | 4 | gradient, orbits and light lines; opening, drift and resolve |
+| `pixel-canvas` | 1 | low-resolution pulse motif |
+| `video` | 4 | synthetic clips with rising light columns; two carry a 1 kHz tone that must stay muted |
+| `hybrid` | 3 | clip background + one or two transparent PNG layers + orbit overlay |
+| `project:garden-light` | 3 | project-local TS module: growing columns and a rising amber orb |
+
+Continuity is declared in `continuity.json` for the amber seed (prop), the garden (location) and the light column (appearance); each shot names the identities it must hold.
+
+### Assets and review
+
+Eleven requirements are fulfilled through the accepted handoff workflow: two by the deterministic offline provider (one video clip, one transparent layer), eight attached and reviewed, and one rejected on purpose. The rejection runs after everything else is approved so the compiler can be asked a precise question: with one rejected asset, is the project render-ready? It answers no, naming exactly that requirement. The replacement then needs a fresh review.
+
+### Production and acceptance
+
+`produce-mv.mjs` renders the full range and inspects the file; `verify-mv-production.mjs` adds decoded pixel and audio evidence plus the negative matrix. The review package under `reports/review-package/` is for a human: contact sheet, stills, shot timeline, QC metrics, continuity checklist, asset status and a decision placeholder. Technical acceptance is automated; continuity and artistic quality are not.
+
+## 14. Limitations
 
 - Beat analysis is constant-tempo energy/autocorrelation plus phase selection; no BPM, meter, downbeat or section inference is authoritative.
 - An onset at frame 0 is outside the detection domain and is reported as `frame-zero-onset-not-detected`; a start anchor must come from an approved manual annotation.
