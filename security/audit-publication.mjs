@@ -25,6 +25,8 @@ const allowlist = JSON.parse(
 const skipDirs = new Set([
   '.git',
   'node_modules',
+  // Local engineering evidence: excluded from Git, never publishable.
+  'reports',
   'factory/dist',
   '.evidence',
   'out',

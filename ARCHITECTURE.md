@@ -133,6 +133,14 @@ Preproduction is a local planning layer, not semantic music understanding and no
 - The CLI in `factory/scripts/preproduction.mjs` writes only under the selected external project via the central write boundary. Revisions are kept under `preproduction/revisions/`.
 - The preview command passes the candidate config through the normal loader/renderer, so approved storyboard cuts affect actual rendered output.
 
+## 9b. AI generation jobs and provider adapters
+
+- `factory/src/generation/types.ts` defines the versioned job, provider, capability, permission and output contracts. Execution state and review state are separate machines; `succeeded` never means `approved`.
+- `factory/src/generation/pipeline.ts` compiles continuity-aware prompts, derives deterministic job identity, enforces the fail-closed permission gate, validates provider output bytes, stages them inside the project and submits them to the existing asset-intake flow as `pending`.
+- `factory/src/generation/providers.ts` holds the declarative capability manifests, the deterministic offline fixture provider that writes real PNG/MP4 bytes, and the Runway adapter pinned to the documented `X-Runway-Version` contract. The adapter only reaches a provider through an injected transport, so no live request can occur implicitly.
+- `factory/scripts/generation.mjs` exposes prepare, status, inspect, approve-request, run-offline, resume, handoff, review and report. `submit-live` always refuses because `LIVE_PROVIDER_EXECUTION` is `NOT_GRANTED`.
+- CI seeds the generation workspace and runs the generation verifier with no provider credentials; only the offline provider and recorded fake responses execute.
+
 ## 10. Renderers and project scene modules
 
 | Renderer | Status | Notes |

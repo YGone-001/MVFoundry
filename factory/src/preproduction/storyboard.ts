@@ -626,14 +626,9 @@ export const validateStoryboard = (
     : array(storyboard.missingAssetRequirements, 'storyboard.missingAssetRequirements').map((id, index) =>
         text(id, `storyboard.missingAssetRequirements[${index}]`),
       );
-  for (const id of computedMissing) {
-    if (!missing.includes(id)) {
-      throw new PreproductionError(`storyboard.missingAssetRequirements must include ${id}`);
-    }
-  }
-  if (storyboard.renderReady === true && computedMissing.length > 0) {
-    throw new PreproductionError('storyboard cannot be renderReady while asset requirements are missing');
-  }
+  // A stored ready flag or missing list can become stale when an asset is
+  // rejected or re-attached. Readiness is always recomputed from live
+  // fulfillment, and the stored claim is never trusted on its own.
   // Readiness is recomputed from live fulfillment so an approved storyboard
   // becomes render-ready once its assets are attached and reviewed, without
   // rewriting the approved document.

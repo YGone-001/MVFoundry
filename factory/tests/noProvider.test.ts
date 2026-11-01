@@ -19,11 +19,16 @@ const walk = (dir: string): string[] => {
 test('G13: factory source and scripts contain no provider or network calls', () => {
   const files = [...walk(path.join(FACTORY_ROOT, 'src')), ...walk(path.join(FACTORY_ROOT, 'scripts'))];
   assert.ok(files.length > 0);
+  // P1-E-C intentionally adds one documented provider adapter, so this guard
+  // forbids network primitives and provider SDK clients rather than the bare
+  // name of the adapter the phase was asked to implement.
   const forbidden = [
     /\bfetch\s*\(/i,
     /XMLHttpRequest/i,
     /https?:\/\//i,
-    /openai|replicate|elevenlabs|stability|runway|pika|webhook/i,
+    /openai|replicate|elevenlabs|stability|pika|webhook/i,
+    /@runwayml|require\(['"]runway|from ['"]runway/i,
+    /api\.runwayml/i,
   ];
   for (const file of files) {
     const text = readFileSync(file, 'utf8');

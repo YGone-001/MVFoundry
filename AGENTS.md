@@ -116,6 +116,21 @@ Do not treat plans, prior reports or user summaries as proof of the current file
 - Re-planning must not silently replace approved continuity entries, approved plans, approved storyboards or accepted assets; each needs an explicit new revision.
 - Production tasks are work orders, not assets. Status distinguishes needed, in-production, delivered, under-review, approved and rejected, and a stale record reads as needed again.
 
+### AI generation jobs and provider adapters
+
+- A generation job is versioned, project-local and traceable to exactly one approved requirement: job id, project, requirement id, storyboard revision, requirement fingerprint, shot ids, provider, operation, model, request revision, compiled prompt, output spec, continuity ids and revisions, input asset refs, permission state, execution state, provider task id, attempts, result files with hashes, failure detail, and review state.
+- Job identity is deterministic over the requirement fingerprint, request specification and revision. Re-preparing the same request returns the same job instead of submitting again. A timeout after submission parks the job as `unknown-submission-state` and blocks any retry until the provider task id is reconciled; a timeout is never treated as a safe retry.
+- Provider execution state and human review state are separate. `succeeded` is not `approved`, and no successful provider task may become a production asset without an explicit review decision.
+- LIVE_PROVIDER_EXECUTION is NOT_GRANTED by default. Live submission requires a per-job permission record naming project, job, provider, model, operation, input assets, upload intent, spend ceiling, submission count and authorization revision. A project `allowNetwork: true`, an approved storyboard or publication permission is never sufficient authorization to spend money.
+- The fail-closed gate blocks when network activity is disabled, credentials are missing, the provider or model is unsupported, limits are exceeded, private reference upload is unauthorized, source provenance cannot be verified, the requirement is stale, or the attempt cap is reached.
+- Credentials are read only from the environment. They never enter project.json, storyboards, job JSON, Git files, AGENTS.md, CI logs, reports or render metadata, and authorization headers are never printed.
+- Provider capabilities are declarative manifests validated before submission: operation, output kind, model, aspect ratio, duration, resolution, reference count, seed, alpha and audio support. Unsupported requests are rejected before any submission; mandatory constraints are never dropped silently.
+- The Runway adapter implements the documented `X-Runway-Version` contract (text-to-image, image-to-video, task status, output retrieval) through an injected transport only. There is no ambient fetch in that path, so no live call can occur by accident. The phase did not execute it live.
+- The offline fixture provider writes real PNG/MP4 bytes for acceptance and marks them `synthetic-offline-test-output`. Offline synthetic media is never described as AI-generated.
+- Generated output is staged inside the project, hashed, probed (`probeVideo`, `probeLayerPng`) and submitted to the existing asset-intake flow as `pending`. Only `review-asset` or `generation review --decision approve` can approve it. Intake fingerprints keep a changed requirement from inheriting old bytes.
+- Remote output retrieval must be HTTPS to expected hosts, with redirect, loopback/link-local, content-type, size and timeout limits. Provider-returned local paths are never followed. An incompatible clip must be rejected or explicitly derived with a recorded FFmpeg command and both hashes; alpha is never invented for an opaque image.
+- CI never receives provider credentials, never submits billable requests, and the fake transport has no network access.
+
 ### Timeline and rendering
 
 - Integer output frames are the canonical editing clock; scene ranges are half-open `[startFrame, endFrame)`.
