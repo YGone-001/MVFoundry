@@ -26,6 +26,14 @@ export type LoadProjectOptions = {
   engineRoot?: string;
   registry?: SceneRegistry;
   configPath?: string;
+  /**
+   * `render` (default) requires a complete, contiguous shot timeline.
+   * `preproduction` additionally loads a freshly initialized project that has no
+   * timeline yet, so planning tools can run before the first storyboard exists.
+   * It never relaxes audio, asset, permission or workspace validation, and the
+   * render path keeps using the default.
+   */
+  stage?: 'render' | 'preproduction';
 };
 
 const readProjectJson = (configFile: string, label: string): unknown => {
@@ -65,6 +73,7 @@ export const loadProject = (
     : path.join(projectDir, 'project.json');
   const config = validateProjectConfig(readProjectJson(configFile, options.configPath ?? 'project.json'), {
     rendererKinds: new Set(registry.kinds()),
+    allowEmptyTimeline: options.stage === 'preproduction',
   });
   if (config.projectId !== projectId) {
     throw new ConfigValidationError(
@@ -139,8 +148,9 @@ export const loadProject = (
     return loaded;
   });
 
-  const shots = resolveShots(config.chapters);
-  assertShotCoverage(shots, durationInFrames);
+  const noTimelineYet = options.stage === 'preproduction' && config.chapters.length === 0;
+  const shots = noTimelineYet ? [] : resolveShots(config.chapters);
+  if (!noTimelineYet) assertShotCoverage(shots, durationInFrames);
   assertMediaTimelines(config, assets, config.output.fps);
   const sampleTolerance = 1 / config.audio.mixSampleRate + 1e-9;
   for (const track of config.audioTracks) {

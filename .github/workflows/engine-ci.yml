@@ -129,6 +129,10 @@ jobs:
         run: npm run mv:seed-b
       - name: Verify independent project production and acceptance
         run: npm run mv:verify-b -- --profile ci --produce
+      - name: Seed creator onboarding workspace
+        run: npm run onboarding:seed
+      - name: Verify creator onboarding, RGB image intake and offline browser readiness
+        run: npm run onboarding:verify
       - name: Verify human-guided workflow, decoded shot previews and creative revision
         run: npm run workflow:verify
       - name: Publication audit

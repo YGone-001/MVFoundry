@@ -113,6 +113,10 @@ Media timing and layer validation happen before rendering. A rejected source doe
 
 Preproduction files (`annotations.json`, `creative-brief.json`, optional lyrics, beat grid, approved beat grid, plans, storyboards, requirements and candidate config) are project-local and engine-authored only through the central write boundary. Approvals, plans and storyboards are revisioned under `preproduction/revisions/`; `project.json` is never overwritten automatically, an approved plan or active approval is never replaced without `--new-revision`, and re-analysis writes only `beat-grid.json`. A candidate config is written only after storyboard approval and full asset fulfillment, and the preview loads that candidate through the normal isolated loader. Missing assets produce a blocked report, not an invented asset reference. Absolute external paths, traversal, cross-project references and symlink/junction escapes are rejected on every preproduction write. Real lyrics and planning artifacts never enter the engine repository or CI artifacts.
 
+## Project metadata files
+
+`mv-project.mjs init` and `import-audio` accept `--metadata-file` pointing at an explicitly selected UTF-8 JSON document. The engine reads only that file, never scans directories for metadata, decodes it as strict UTF-8, refuses unknown keys, non-string values, control characters and oversized documents, and refuses a field that is declared twice with different values. The file may live in the authorized external workspace; it is never copied into the engine repository, and its contents are not credentials — no code path treats metadata as a secret or a provider key.
+
 ## Render output overrides
 
 - Default output: `<project>/renders/<projectId>-render.mp4` or `...-still-NNNN.png`.

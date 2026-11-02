@@ -41,7 +41,9 @@
     "render:project": "npm run build && node factory/scripts/render-project.mjs",
     "verify:modules": "npm run build && node factory/scripts/verify-module-render.mjs",
     "audit:git": "npm run build && node factory/scripts/audit-git.mjs",
-    "audit:publication": "node security/audit-publication.mjs"
+    "audit:publication": "node security/audit-publication.mjs",
+    "onboarding:seed": "npm run build && node factory/scripts/seed-mv-onboarding.mjs",
+    "onboarding:verify": "npm run build && node factory/scripts/verify-mv-onboarding.mjs"
   },
   "dependencies": {
     "@remotion/bundler": "4.0.539",

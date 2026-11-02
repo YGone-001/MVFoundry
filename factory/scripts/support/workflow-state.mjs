@@ -20,7 +20,7 @@ export const hash = (value) => createHash('sha256').update(typeof value === 'str
 export const refuse = (code, message) => { throw Object.assign(new Error(message), {code}); };
 export const shotsOf = (board) => (board?.chapters ?? []).flatMap((c) => c.shots);
 export function openWorkflow(projectId, workspaceRoot, revision) {
-  const project = loadProject(projectId, {workspaceRoot, engineRoot});
+  const project = loadProject(projectId, {workspaceRoot, engineRoot, stage: 'preproduction'});
   const boundary = createProjectWriteBoundary(project, {engineRoot});
   const file = (relative, required = true) => {
     if (typeof relative !== 'string' || path.isAbsolute(relative) || relative.split(/[\\/]/).includes('..')) refuse('UNSAFE_PROJECT_PATH', 'Use a project-relative path without parent traversal');

@@ -114,7 +114,10 @@ Race limitation: Node.js path-based filesystem APIs do not provide an atomic ope
 - 16-bit PCM WAV metadata is read locally; SHA256 and duration are verified.
 - Approved assets are hash-verified and staged into `cache/render-public`.
 - Video assets are probed with FFprobe: MP4/H.264, dimensions, constant frame rate, duration, audio presence and zero rotation. VFR, rotated, corrupt, unsupported or too-short sources fail closed.
+- Approved still images are `image` assets and accept ordinary 8-bit PN​G data (grayscale, RGB, grayscale-alpha, RGBA); transparency is optional and only reported. Layer assets keep the strict alpha rule.
 - Layer assets are validated as 8-bit alpha PNGs via their IHDR before staging.
+- The browser is resolved before staging, mixing or bundling: `checkRenderBrowser` uses Remotion's `ensureBrowser` with a throwing download callback, so an unusable browser becomes a `BROWSER_*` refusal (exit 3) rather than an implicit download or a misclassified compositor error.
+- A newly initialized project carries no render timeline; preproduction stages load it with `stage: 'preproduction'`, while the render path keeps requiring a complete, contiguous shot timeline.
 - Video sources are mapped to shot-local time with Remotion `Sequence` and `OffthreadVideo`'s composition-frame `trimBefore`; embedded audio is muted.
 - Hybrid shots compose fallback background, video, ordered transparent PNG layers and a deterministic Canvas overlay.
 - Video is produced by `renderFrames` (lossless PNG) plus system FFmpeg, because Remotion's bundled FFmpeg may not be able to write outside the repository in restricted environments.

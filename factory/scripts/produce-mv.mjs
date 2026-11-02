@@ -69,7 +69,7 @@ const log = (message) => console.error(`[mv] ${message}`);
 const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
 const sha = (file) => createHash('sha256').update(readFileSync(file)).digest('hex');
 
-const project = loadProject(projectId, {workspaceRoot, engineRoot: repoRoot});
+const project = loadProject(projectId, {workspaceRoot, engineRoot: repoRoot, stage: 'preproduction'});
 const boundary = createProjectWriteBoundary(project, {engineRoot: repoRoot});
 const startedAt = new Date().toISOString();
 

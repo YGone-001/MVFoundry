@@ -18,7 +18,9 @@ const writePngHeader = (
   bitDepth = 8,
   colorType = 6,
 ): void => {
-  const buffer = Buffer.alloc(33);
+  // IHDR plus a terminating IEND so the fixture is a structurally complete
+  // PNG; the probe deliberately checks for truncation.
+  const buffer = Buffer.alloc(45);
   Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(buffer, 0);
   buffer.writeUInt32BE(13, 8);
   buffer.write('IHDR', 12, 'ascii');
@@ -26,6 +28,9 @@ const writePngHeader = (
   buffer.writeUInt32BE(height, 20);
   buffer[24] = bitDepth;
   buffer[25] = colorType;
+  buffer.writeUInt32BE(0, 33);
+  buffer.write('IEND', 37, 'ascii');
+  buffer.writeUInt32BE(0xae426082, 41);
   writeFileSync(file, buffer);
 };
 

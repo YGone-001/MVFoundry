@@ -52,3 +52,24 @@ Preview verification decodes every frame at inspection size, checks dimensions/F
 Review packages contain Markdown, JSON details, a decoded contact sheet and stills, video links, concept, sections, timeline, renderer distribution, requirements, intake/continuity, QC, review/change history, revision snapshots and master locations. The final decision starts as NOT REVIEWED. All outputs stay in the external project.
 
 Exit codes: 0 success; 2 invalid/refused; 3 status/readiness blocked. Windows CI runs `workflow:verify` after both full synthetic MV verifiers. The new verifier reuses accepted baselines for previews and iterates in a fresh synthetic copy; it renders the complete corrected MV, checks idempotency and explicit rerender, and injects a failed retry to verify that no success manifest is fabricated. No credentials or uploads are involved.
+
+## First-run onboarding
+
+A new project is created without a render timeline, so analysis and planning do not need a hand-written placeholder chapter:
+
+```sh
+node factory/scripts/mv-project.mjs init --project my-project --workspace <external-root> \
+  --width 1920 --height 1080 --fps 30 --audio <file> --metadata-file <utf8.json>
+
+npm run preproduction -- analyze-beats --project my-project
+npm run preproduction -- validate --project my-project
+# write annotations.json and creative-brief.json, then:
+npm run preproduction -- plan --project my-project
+npm run preproduction -- approve-plan --project my-project --revision 1
+npm run preproduction -- storyboard --project my-project
+npm run preproduction -- attach-asset --project my-project --requirement REQ-001 \
+  --asset-id PLATE-01 --path intake/plate-01.png --provenance "<source>" --rights "<rights>"
+npm run preproduction -- review-asset --project my-project --requirement REQ-001 --decision approve --notes "<review>"
+```
+
+`--metadata-file` is a JSON document with any of `title`, `artist`, `source`, `rights` and `styleProfile`. It is decoded as strict UTF-8, unknown keys are refused, and a field supplied twice with different values is refused; identical duplicates are accepted. Use it whenever the parent shell cannot be trusted with non-ASCII text. `onboarding:seed` and `onboarding:verify` reproduce this whole path against synthetic media, including the browser refusal, the low-wash revision and a decoded 900-frame MP4.

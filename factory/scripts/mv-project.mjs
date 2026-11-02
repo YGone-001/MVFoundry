@@ -63,11 +63,16 @@ init:
   --source "<text>"       declared provenance of the audio file
   --rights "<text>"       declared rights statement for the audio file
   --title "<text>" --artist "<text>"   optional song metadata
+  --metadata-file <path>  explicit UTF-8 JSON document with title, artist,
+                          source, rights and/or styleProfile; identical values
+                          may also be passed on the command line, differing
+                          values are refused
   --force                 allow init when only an empty project dir exists
 
 import-audio:
   --project <id> --workspace <root>
   --audio <path> --source "<text>" --rights "<text>"
+  --metadata-file <path>  explicit UTF-8 JSON document supplying source/rights
   --replace               explicitly supersede an already approved source
 
 Nothing here approves assets, plans, or storyboards, and nothing contacts a
@@ -95,6 +100,20 @@ if (!workspaceRoot) fail('MV_WORKSPACE_ROOT or --workspace is required');
 const {createWriteBoundary, ensureSafeDirectory, assertSafePath} = require('../dist/src/workspace/writeBoundary.js');
 const {probeAudio} = require('../dist/src/media/audioProbe.js');
 const {sha256File} = require('../dist/src/media/hash.js');
+const {parseProjectMetadataFile, mergeProjectMetadata} = require('../dist/src/project/metadata.js');
+
+// Metadata may come from an explicitly selected UTF-8 JSON document so that
+// non-ASCII titles, artists, provenance and rights statements never depend on
+// the parent shell's argument encoding.
+const readMetadata = () => {
+  const file = arg('metadata-file');
+  if (!file) return {metadata: {}, file: null};
+  const resolved = absolute(file);
+  if (!existsSync(resolved)) {
+    fail(`metadata file does not exist: ${resolved}`, 'missing-metadata-file');
+  }
+  return {metadata: parseProjectMetadataFile(resolved), file: resolved};
+};
 
 const absolute = (value) => path.resolve(value);
 const workspaceAbsolute = absolute(workspaceRoot);
@@ -270,11 +289,24 @@ if (command === 'init') {
   ensureSafeDirectory(boundary, path.join(projectDir, 'renders'), 'project');
   ensureSafeDirectory(boundary, path.join(projectDir, 'reports'), 'project');
 
+  const {metadata: fileMetadata, file: metadataFile} = readMetadata();
+  const metadata = mergeProjectMetadata(
+    {
+      title: arg('title'),
+      artist: arg('artist'),
+      source: arg('source'),
+      rights: arg('rights'),
+      styleProfile: arg('style'),
+    },
+    fileMetadata,
+    metadataFile,
+  );
+
   const audio = importAudio({
     targetDir: projectDir,
     sourcePath: arg('audio'),
-    sourceDeclaration: arg('source', ''),
-    rightsDeclaration: arg('rights', ''),
+    sourceDeclaration: metadata.source ?? '',
+    rightsDeclaration: metadata.rights ?? '',
     replace: false,
   });
 
@@ -285,8 +317,8 @@ if (command === 'init') {
     schemaVersion: 1,
     projectId,
     song: {
-      title: arg('title', projectId),
-      artist: arg('artist', 'unspecified'),
+      title: metadata.title ?? projectId,
+      artist: metadata.artist ?? 'unspecified',
     },
     audio: {
       path: audio.path,
@@ -300,7 +332,7 @@ if (command === 'init') {
     lyrics: {language: 'none', path: null},
     narrative: {mode: 'narrative'},
     visual: {
-      styleProfile: arg('style', 'unspecified'),
+      styleProfile: metadata.styleProfile ?? 'unspecified',
       defaultRenderer: 'layered-canvas',
       pixel: {
         internalWidth: Math.max(8, Math.round(width / 4)),
@@ -369,11 +401,17 @@ if (command === 'import-audio') {
   const boundary = createWriteBoundary({projectDir, engineRoot: repoRoot});
   const project = readJson(projectFile);
 
+  const {metadata: fileMetadata, file: metadataFile} = readMetadata();
+  const metadata = mergeProjectMetadata(
+    {source: arg('source'), rights: arg('rights')},
+    fileMetadata,
+    metadataFile,
+  );
   const audio = importAudio({
     targetDir: projectDir,
     sourcePath: arg('audio'),
-    sourceDeclaration: arg('source', ''),
-    rightsDeclaration: arg('rights', ''),
+    sourceDeclaration: metadata.source ?? '',
+    rightsDeclaration: metadata.rights ?? '',
     replace: hasFlag('replace'),
   });
 

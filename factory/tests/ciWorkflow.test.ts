@@ -105,6 +105,8 @@ test('G12: workflow runs the required engine and security commands', () => {
     'npm run mv:verify',
     'npm run mv:seed-b',
     'npm run mv:verify-b',
+    'npm run onboarding:seed',
+    'npm run onboarding:verify',
     'npm run audit:publication',
     'npm run audit:git',
   ]) {
@@ -172,6 +174,8 @@ test('G12: workspace is initialized from RUNNER_TEMP via GITHUB_ENV before seedi
   const mvVerifyIndex = names.indexOf('Produce and verify the complete synthetic music video');
   const mvSeedBIndex = names.indexOf('Seed independent project workspace');
   const mvVerifyBIndex = names.indexOf('Verify independent project production and acceptance');
+  const onboardingSeedIndex = names.indexOf('Seed creator onboarding workspace');
+  const onboardingVerifyIndex = names.indexOf('Verify creator onboarding, RGB image intake and offline browser readiness');
   assert.ok(provisionIndex >= 0 && ffmpegIndex > provisionIndex, 'FFmpeg provisioning must precede verification');
   assert.ok(typecheckIndex > ffmpegIndex, 'FFmpeg must be provisioned and verified before typecheck');
   assert.ok(testIndex > typecheckIndex, 'tests must follow typecheck');
@@ -201,6 +205,9 @@ test('G12: workspace is initialized from RUNNER_TEMP via GITHUB_ENV before seedi
   assert.ok(mvVerifyIndex > mvSeedIndex, 'music-video verification must follow its seeding');
   assert.ok(mvSeedBIndex > mvVerifyIndex, 'independent project seeding must follow the Signal Garden verification');
   assert.ok(mvVerifyBIndex > mvSeedBIndex, 'independent project verification must follow its seeding');
+  assert.ok(onboardingSeedIndex > mvVerifyBIndex, 'onboarding seeding must follow the independent project verification');
+  assert.ok(onboardingVerifyIndex > onboardingSeedIndex, 'onboarding verification must follow its seeding');
+  assert.ok(names.indexOf('Verify human-guided workflow, decoded shot previews and creative revision') > onboardingVerifyIndex, 'workflow verification must follow onboarding verification');
   assert.ok(names.indexOf('Publication audit') > mvVerifyBIndex, 'publication audit must follow independent project verification');
   assert.ok(names.indexOf('Git media audit') > mvVerifyIndex, 'Git media audit must follow music-video verification');
   assert.ok(!names.includes('Record media/audio render limitation'), 'audio acceptance must not be skippable');

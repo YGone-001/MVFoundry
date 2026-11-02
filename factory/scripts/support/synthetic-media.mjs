@@ -78,6 +78,43 @@ const pngChunk = (type, data) => {
   return Buffer.concat([length, name, data, crc]);
 };
 
+/**
+ * Opaque RGB PNG (colour type 2, no alpha channel) with one bright horizontal
+ * band. This is the ordinary-photograph shape: an image requirement must accept
+ * it, while a transparent-layer requirement must still refuse it.
+ */
+export const writeOpaqueRgbPng = (file, width, height, rgb, band = null) => {
+  const rowSize = width * 3 + 1;
+  const raw = Buffer.alloc(rowSize * height);
+  const bandRows = band ?? {from: 0.4, to: 0.55};
+  for (let y = 0; y < height; y++) {
+    const row = y * rowSize;
+    raw[row] = 0;
+    const inBand = y > height * bandRows.from && y < height * bandRows.to;
+    for (let x = 0; x < width; x++) {
+      const index = row + 1 + x * 3;
+      raw[index] = inBand ? Math.min(255, rgb[0] + 120) : rgb[0];
+      raw[index + 1] = inBand ? Math.min(255, rgb[1] + 120) : rgb[1];
+      raw[index + 2] = inBand ? Math.min(255, rgb[2] + 120) : rgb[2];
+    }
+  }
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 2;
+  mkdirSync(path.dirname(file), {recursive: true});
+  writeFileSync(
+    file,
+    Buffer.concat([
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      pngChunk('IHDR', header),
+      pngChunk('IDAT', deflateSync(raw, {level: 6})),
+      pngChunk('IEND', Buffer.alloc(0)),
+    ]),
+  );
+};
+
 /** Opaque RGBA PNG with one bright horizontal band. */
 export const writePlatePng = (file, width, height, rgb) => {
   const rowSize = width * 4 + 1;

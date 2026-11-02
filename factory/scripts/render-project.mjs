@@ -5,7 +5,7 @@
 // Requires: npm run factory:build.
 
 import {execFileSync} from 'node:child_process';
-import {copyFileSync, readdirSync, renameSync, statSync, writeFileSync} from 'node:fs';
+import {copyFileSync, existsSync, readdirSync, renameSync, statSync, writeFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -56,6 +56,40 @@ const {
 } = require('../dist/src/workspace/writeBoundary.js');
 
 const project = loadProject(projectId, {workspaceRoot, engineRoot: repoRoot, configPath});
+
+// Browser readiness is decided before staging, mixing, bundling or any frame
+// work. A missing browser is a setup problem, not a compositor failure, and it
+// must never trigger an implicit download.
+const {checkRenderBrowser} = require('../dist/src/remotion/browserReadiness.js');
+const {ensureBrowser, getCompositions, openBrowser, renderFrames, renderStill} = await import(
+  '@remotion/renderer'
+);
+const browserReadiness = await checkRenderBrowser({
+  env: process.env,
+  ensureBrowser: (options) =>
+    ensureBrowser({browserExecutable: options.browserExecutable, onBrowserDownload: options.onBrowserDownload}),
+  existsFile: (candidate) => existsSync(candidate),
+});
+if (browserReadiness.tlsWarning) {
+  console.error(`WARNING: ${browserReadiness.tlsWarning}`);
+}
+if (browserReadiness.status !== 'BROWSER_READY') {
+  console.error(
+    JSON.stringify(
+      {
+        status: 'REFUSED',
+        code: browserReadiness.status,
+        message: browserReadiness.detail,
+        browser: browserReadiness,
+        note: 'No bundle, audio mix, cache write, frame render or output file was produced.',
+      },
+      null,
+      2,
+    ),
+  );
+  process.exit(3);
+}
+
 if (mode === 'still' && (!Number.isInteger(stillFrame) || stillFrame < 0 || stillFrame >= project.durationInFrames)) {
   throw new Error(`Still frame ${stillFrame} is outside [0, ${project.durationInFrames})`);
 }
@@ -106,14 +140,8 @@ const prepared = await bundleProject(project, {
   onProgress: () => undefined,
 });
 
-const {getCompositions, openBrowser, renderFrames, renderStill} = await import(
-  '@remotion/renderer'
-);
-
-// Browser selection is configuration-driven. When unset, Remotion manages its
-// own headless shell.
-const browserExecutable =
-  process.env.REMOTION_BROWSER_EXECUTABLE ?? process.env.CHROME_PATH ?? null;
+// The browser was resolved and validated before any expensive work started.
+const browserExecutable = browserReadiness.executable;
 
 const serveUrl = prepared.serveUrl;
 
@@ -315,6 +343,12 @@ try {
     bytes: statSync(output).size,
     frames: reportFrames,
     encoder: mode === 'video' ? 'system-ffmpeg' : 'remotion-render-still',
+    browser: {
+      status: browserReadiness.status,
+      source: browserReadiness.source,
+      executable: browserReadiness.executable,
+      tlsWarning: browserReadiness.tlsWarning,
+    },
     networkActions: ['none; local bundle and local files only'],
   };
   writeFileSync(reportPath, JSON.stringify(report, null, 2));

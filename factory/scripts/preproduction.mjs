@@ -66,7 +66,7 @@ const {createProjectWriteBoundary} = require('../dist/src/workspace/writeBoundar
 const {resolveProjectRelativePath, isInside} = require('../dist/src/workspace/guard.js');
 const {sha256File} = require('../dist/src/media/hash.js');
 const {probeVideo} = require('../dist/src/media/videoProbe.js');
-const {probeLayerPng} = require('../dist/src/media/pngProbe.js');
+const {probeLayerPng, probeImagePng} = require('../dist/src/media/pngProbe.js');
 const {analyzeBeatGrid, buildApprovedBeatGrid} = require('../dist/src/preproduction/beatGrid.js');
 const {
   validateAnnotations,
@@ -115,7 +115,7 @@ const revisionNumber = () => {
 // is reported, never silently repaired, so re-analysis and re-approval always
 // remain possible.
 const loadBeatEvidence = () => {
-  const project = loadProject(projectId, {workspaceRoot, engineRoot: repoRoot});
+  const project = loadProject(projectId, {workspaceRoot, engineRoot: repoRoot, stage: 'preproduction'});
   const boundary = createProjectWriteBoundary(project, {engineRoot: repoRoot});
   const gridContext = {
     projectId,
@@ -158,7 +158,7 @@ const loadBeatEvidence = () => {
 };
 
 const loadInputs = ({requireApproved = false} = {}) => {
-  const project = loadProject(projectId, {workspaceRoot, engineRoot: repoRoot});
+  const project = loadProject(projectId, {workspaceRoot, engineRoot: repoRoot, stage: 'preproduction'});
   const boundary = createProjectWriteBoundary(project, {engineRoot: repoRoot});
   const context = {
     projectId,
@@ -267,7 +267,7 @@ const activeOrRevision = (kind, activePath) => {
 };
 
 const loadProjectProjectDir = () => {
-  const project = loadProject(projectId, {workspaceRoot, engineRoot: repoRoot});
+  const project = loadProject(projectId, {workspaceRoot, engineRoot: repoRoot, stage: 'preproduction'});
   return project.projectDir;
 };
 
@@ -685,13 +685,15 @@ const run = () => {
         );
       }
     } else if (requirement.kind === 'layer' || requirement.kind === 'image') {
-      const metadata = probeLayerPng(realFile, assetId);
-      technical.probed = requirement.kind === 'layer' ? 'layer' : 'image';
+      const isLayer = requirement.kind === 'layer';
+      // Ordinary images accept opaque 8-bit RGB; transparent layers stay strict.
+      const metadata = isLayer ? probeLayerPng(realFile, assetId) : probeImagePng(realFile, assetId);
+      technical.probed = isLayer ? 'layer' : 'image';
       technical.width = metadata.width;
       technical.height = metadata.height;
-      technical.hasAlpha = metadata.hasAlpha ?? metadata.colorType === 6;
+      technical.hasAlpha = metadata.hasAlpha;
       technical.codec = 'png';
-      if (requirement.kind === 'layer' && technical.hasAlpha !== true) {
+      if (isLayer && technical.hasAlpha !== true) {
         fail(`Layer ${assetId} has no alpha channel; a transparent PNG is required for ${requirementId}`);
       }
     } else if (requirement.kind === 'audio-reference') {

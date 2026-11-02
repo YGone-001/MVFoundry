@@ -63,6 +63,7 @@ Requirements:
 
 ## Pipeline
 
+0. Resolve the render browser before any staging, mixing, bundling or frame work. `checkRenderBrowser` calls Remotion's `ensureBrowser` with a download callback that always throws, so a host without a usable browser is refused with `BROWSER_READY`, `BROWSER_MISSING`, `BROWSER_EXECUTABLE_INVALID`, `BROWSER_VERSION_UNSUPPORTED` or `BROWSER_PROVISIONING_NOT_AUTHORIZED` and exit code 3. `REMOTION_BROWSER_EXECUTABLE` / `CHROME_PATH` select an installed browser; otherwise a browser that Remotion already manages is used. Nothing is downloaded implicitly. The chosen source and executable are recorded in the render report. A host that exports `NODE_TLS_REJECT_UNAUTHORIZED=0` produces a warning; the engine never sets or relies on that variable.
 1. Load and validate the project, including `sceneModules`, `moduleParams`, typed `media` and `audioTracks`.
 2. Verify the master audio format/decoded duration/hash, approved asset hashes, declared module hashes and FFprobe/PNG/audio metadata.
 3. Reject unsupported, corrupt, unapproved, VFR/rotated video, non-alpha layer PNGs or unsupported/multichannel audio.

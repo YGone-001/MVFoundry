@@ -235,7 +235,7 @@ const fail = (message) => {
 };
 
 const loadContext = () => {
-  const project = loadProject(projectId, {workspaceRoot, engineRoot: repoRoot});
+  const project = loadProject(projectId, {workspaceRoot, engineRoot: repoRoot, stage: 'preproduction'});
   const boundary = createProjectWriteBoundary(project, {engineRoot: repoRoot});
   const context = {
     projectId,

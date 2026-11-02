@@ -26,7 +26,15 @@ const identifier=()=>W.recordId(opts.id??randomUUID());
 function child(script, extra) {
   const r=spawnSync(process.execPath,[path.join(W.engineRoot,'factory/scripts',script),'--project',opts.project,'--workspace',opts.workspace??process.env.MV_WORKSPACE_ROOT,...extra],
     {windowsHide:true,encoding:'utf8',maxBuffer:64*1024*1024,timeout:30*60*1000});
-  if(r.status!==0) W.refuse('RENDER_FAILED',`${script} exit=${r.status} signal=${r.signal}: ${(r.stderr??'').slice(-6000)}`);
+  if(r.status!==0) {
+    // The render CLI refuses with exit 3 and a structured browser diagnostic
+    // before any expensive work when no usable browser is available.
+    const err=String(r.stderr??'');
+    if(r.status===3 && /BROWSER_(MISSING|EXECUTABLE_INVALID|VERSION_UNSUPPORTED|PROVISIONING_NOT_AUTHORIZED)/.test(err)) {
+      W.refuse('BROWSER_NOT_READY',`${script} exit=${r.status}: ${err.slice(-4000)}`);
+    }
+    W.refuse('RENDER_FAILED',`${script} exit=${r.status} signal=${r.signal}: ${err.slice(-6000)}`);
+  }
   return r;
 }
 function compare(w) {

@@ -102,6 +102,16 @@ export type SceneParams = {
   bars?: number;
   motion?: number;
   label?: string;
+  /**
+   * Optional image-overlay controls for the layered-canvas renderer. Omitting
+   * them keeps the historical defaults exactly (0.18 / 0.55 / 0.22 / 0.6 / 0.08).
+   * Each value is a 0-1 alpha or opacity.
+   */
+  washTop?: number;
+  washBottom?: number;
+  overlayOpacity?: number;
+  lineOpacity?: number;
+  grainOpacity?: number;
 };
 
 export type MediaFit = 'contain' | 'cover';

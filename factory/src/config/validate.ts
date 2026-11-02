@@ -121,6 +121,20 @@ const validateParams = (value: unknown, field: string): SceneParams => {
   result.assetId = optionalText(params.assetId, `${field}.assetId`);
   if (params.bars !== undefined) result.bars = integer(params.bars, `${field}.bars`, 1);
   if (params.motion !== undefined) result.motion = number(params.motion, `${field}.motion`);
+  const unit = (name: 'washTop' | 'washBottom' | 'overlayOpacity' | 'lineOpacity' | 'grainOpacity'): void => {
+    const raw = params[name];
+    if (raw === undefined) return;
+    const parsed = number(raw, `${field}.${name}`);
+    if (!(parsed >= 0 && parsed <= 1)) {
+      fail(`${field}.${name} must be between 0 and 1, received ${parsed}`);
+    }
+    result[name] = parsed;
+  };
+  unit('washTop');
+  unit('washBottom');
+  unit('overlayOpacity');
+  unit('lineOpacity');
+  unit('grainOpacity');
   return result;
 };
 
@@ -581,6 +595,13 @@ const validateChapter = (
 
 export type ValidateOptions = {
   rendererKinds?: ReadonlySet<string>;
+  /**
+   * Preproduction-stage loading only. A freshly initialized project has no
+   * render timeline yet, so an empty `chapters` array is accepted there. The
+   * render path never passes this flag, so a project without a real, complete
+   * shot timeline can never be rendered.
+   */
+  allowEmptyTimeline?: boolean;
 };
 
 export const validateProjectConfig = (
@@ -706,7 +727,12 @@ export const validateProjectConfig = (
   }
 
   const chaptersRaw = array(config.chapters, 'chapters');
-  if (chaptersRaw.length === 0) fail('chapters must not be empty');
+  if (chaptersRaw.length === 0 && !options.allowEmptyTimeline) {
+    fail('chapters must not be empty');
+  }
+  // A preproduction-stage load may legally carry no timeline yet; every other
+  // project rule (audio, duration, assets, permissions) still applies below.
+  const timelineAllowedEmpty = chaptersRaw.length === 0;
   const chapters = chaptersRaw.map((chapter, index) =>
     validateChapter(chapter, index, assetById, fps),
   );
@@ -718,7 +744,7 @@ export const validateProjectConfig = (
     }
     cursor = chapter.endFrame;
   }
-  if (cursor !== derivedDuration) {
+  if (!timelineAllowedEmpty && cursor !== derivedDuration) {
     fail(`chapters must end at the derived duration ${derivedDuration}, received ${cursor}`);
   }
   const allShots = chapters.flatMap((chapter) => chapter.shots);

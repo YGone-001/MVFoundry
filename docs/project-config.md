@@ -189,7 +189,7 @@ The policy is part of the project contract. The engine never assumes 4919 frames
 | Renderer | Canvas | Sampling | Params |
 |---|---|---|---|
 | `pixel-canvas` | `visual.pixel.internalWidth × internalHeight` | `visual.pixel.samplingFps` | `background`, `accent`, `secondary`, `bars`, `motion`, `label` |
-| `layered-canvas` | output width × height | output fps | `background`, `accent`, `secondary`, `assetId`, `motion`, `label` |
+| `layered-canvas` | output width × height | output fps | `background`, `accent`, `secondary`, `assetId`, `motion`, `label`, and the optional image grading controls `washTop`, `washBottom`, `overlayOpacity`, `lineOpacity`, `grainOpacity` (0–1) |
 | `video` | output | output fps | `params` plus required shot-level `media` |
 | `hybrid` | output | output fps | `params` plus required shot-level `media` with layers |
 | `project:<id>` | module declaration (`output`, `project-pixel` or custom) | module declaration | `params` plus JSON-safe `moduleParams` validated by the module |
@@ -395,6 +395,10 @@ This is a candidate-event foundation. It does not compute BPM, meter, tempo chan
 - Analysis and mixing never change shot boundaries, chapter ownership, `durationInFrames` or the declared duration policy.
 
 ## 6. Assets and approval
+
+Still images are declared as kind `image` and layers as kind `layer`. An `image` asset is an 8-bit PNG of colour type 0 (grayscale), 2 (RGB), 4 (grayscale + alpha) or 6 (RGBA); transparency is optional and only reported, so an ordinary opaque photograph is valid. A `layer` asset must be colour type 4 or 6, because the Hybrid renderer needs real alpha. Palette (colour type 3) and 16-bit PNG data are refused instead of being approximated, and JPEG intake is not implemented. Decoder compatibility is proven by an actual render, not by the header probe.
+
+Image grading for `layered-canvas` is opt-in. Omitting `washTop`/`washBottom`/`overlayOpacity`/`lineOpacity`/`grainOpacity` reproduces the historical grade exactly (0.18, 0.55, 0.22, 0.6, 0.08); an explicit low-wash configuration keeps more of the creator image's colour without touching timing, audio, asset identity or renderer family. A measured saturation increase is not an artistic approval.
 
 - `approved`: hash-verified, staged to `cache/render-public`, usable.
 - `pending`, `rejected`, `not_present`: never staged and never usable in a scene.

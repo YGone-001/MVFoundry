@@ -183,6 +183,10 @@ The plan is `proposed`, not active project config. Approved plans are never over
 
 `report-assets` writes the manifest and returns exit code 2 while requirements are missing. Supported requirement kinds include image, video, transparent layer, Canvas scene module and existing asset. Statuses distinguish needed, in-production, available, approved and rejected. A requirement is not an asset; it becomes fulfilled only through an approved, verified local file or declared scene module.
 
+`attach-asset` is the intake path for image, video and layer requirements. An `image` requirement accepts an ordinary 8-bit PNG — grayscale, RGB, grayscale-alpha or RGBA — so a plain opaque photograph is valid and its missing alpha is only reported; a `layer` requirement keeps the strict alpha rule (colour type 4 or 6) because the Hybrid renderer needs real transparency. The same opaque PNG that is accepted as an image must be refused as a layer, palette and 16-bit PNGs are refused rather than approximated, and JPEG intake is not implemented. Every attachment lands as `review: "pending"`: only `review-asset --decision approve` binds it, and `review-asset --decision reject` keeps the requirement unfulfilled.
+
+A project created by `mv-project.mjs init` has `chapters: []`. Preproduction commands load it through the preproduction stage, which accepts an empty timeline; the render loader does not, so an unfinished project can never render and no placeholder shot is invented.
+
 To fulfil a requirement, add the approved local asset/declared module to the project, edit the plan requirement to `status: "approved"` with the real `fulfilledAssetId`, regenerate the storyboard, approve the revised storyboard, and recompile. The engine does not invent an asset ID, download media, or generate an image/video.
 
 ### CLI and exit codes

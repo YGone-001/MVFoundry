@@ -272,6 +272,17 @@ Do not treat plans, prior reports or user summaries as proof of the current file
 - `.workbuddy-ai/` is local agent state: it must never be tracked, staged, committed or included in the publication inventory.
 
 
+### Creator onboarding, offline browser readiness and still-image intake
+
+- `mv-project.mjs init` writes a project with no render timeline (`chapters: []`). Preproduction tooling therefore loads a project with the explicit preproduction stage (`stage: 'preproduction'`), which accepts an empty timeline so analysis and planning can begin immediately. The render path keeps the default stage and a project without a complete, contiguous, approved shot timeline still cannot be rendered. The relaxed stage never weakens audio hash/duration, asset, permission or workspace validation, and it never invents a placeholder shot or an approval.
+- Ordinary still images are `kind: "image"` and accept 8-bit RGB, RGBA, grayscale and grayscale-alpha PNG data; transparency is optional and only reported. Transparent layers are `kind: "layer"` and still require an alpha-capable PNG (colour type 4 or 6). The same opaque PNG that is valid as an image must be refused as a layer, and a JPEG or corrupt/truncated file must be refused by both.
+- Palette (colour type 3) and 16-bit PNG data are refused rather than approximated, and JPEG intake is not implemented; do not document support for formats the engine does not probe. Decoder compatibility is proven by an actual render, never by the header probe alone.
+- `attach-asset` never approves anything: a record lands as `review: "pending"` and only `review-asset` can approve or reject it. `report-assets` keeps returning a non-zero exit while requirements are unresolved.
+- Rendering resolves the browser before staging, mixing, bundling or any frame work. `checkRenderBrowser` wraps Remotion's `ensureBrowser` with a download callback that throws, so a host without a usable browser is refused (`BROWSER_MISSING`, `BROWSER_PROVISIONING_NOT_AUTHORIZED`, `BROWSER_EXECUTABLE_INVALID`, `BROWSER_VERSION_UNSUPPORTED`) instead of silently downloading one. The selected browser source and executable are recorded in the render report. A missing browser is a setup refusal, not a compositor failure, and `mv:workflow` reports it as `BROWSER_NOT_READY`.
+- No engine code sets, clears or relies on `NODE_TLS_REJECT_UNAUTHORIZED`. When the host exports `0`, the render path reports a warning; the transport keeps its explicit `rejectUnauthorized: true` and certificate verification is never disabled. Correcting that variable is not a fix for a missing local browser.
+- Command-line text is owned by the parent shell's encoding. Non-ASCII song titles, artist names, provenance and rights statements are supplied with `--metadata-file <utf8-json>`: the document is decoded as strict UTF-8, unknown keys are rejected, and a field declared twice with differing values is refused. The engine never scans folders for metadata.
+- `layered-canvas` keeps its historical grade exactly when the per-shot `washTop`, `washBottom`, `overlayOpacity`, `lineOpacity` and `grainOpacity` parameters are omitted (0.18, 0.55, 0.22, 0.6, 0.08). An explicit low-wash configuration preserves more of the creator image's colour; it never changes timing, audio, asset identity, source hashes or renderer family, and a measured saturation increase is not an artistic approval.
+
 ### Timeline and rendering
 
 - Integer output frames are the canonical editing clock; scene ranges are half-open `[startFrame, endFrame)`.
@@ -339,6 +350,8 @@ npm run mv:seed
 npm run mv:produce -- --project synthetic-mv-signal-garden
 npm run mv:verify -- --project synthetic-mv-signal-garden
 npm run mv:verify -- --profile ci --produce
+npm run onboarding:seed
+npm run onboarding:verify
 npm run preproduction -- continuity --project synthetic-mixed-timeline-demo
 npm run preproduction -- tasks --project synthetic-mixed-timeline-demo
 npm run preproduction -- attach-asset --project synthetic-mixed-timeline-demo --requirement REQ-001 --asset-id VID-HARBOUR --path intake/video/harbour-30fps.mp4 --provenance "<source>" --rights "<licence>"

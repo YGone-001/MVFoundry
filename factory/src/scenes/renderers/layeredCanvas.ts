@@ -19,6 +19,13 @@ export const layeredCanvasRenderer: SceneRenderer = {
     const accent = params.accent ?? '#2EC4B6';
     const secondary = params.secondary ?? '#FF9F1C';
     const hasImage = Boolean(params.assetId && publicAssets[params.assetId]);
+    // Omitted values reproduce the historical grade exactly; only an explicit
+    // per-shot setting changes how much of the creator image survives.
+    const washTop = params.washTop ?? 0.18;
+    const washBottom = params.washBottom ?? 0.55;
+    const overlayOpacity = params.overlayOpacity ?? 0.22;
+    const lineOpacity = params.lineOpacity ?? 0.6;
+    const grainOpacity = params.grainOpacity ?? 0.08;
 
     ctx.clearRect(0, 0, width, height);
     if (!hasImage) {
@@ -29,8 +36,8 @@ export const layeredCanvasRenderer: SceneRenderer = {
       ctx.fillRect(0, 0, width, height);
     } else {
       const wash = ctx.createLinearGradient(0, 0, 0, height);
-      wash.addColorStop(0, 'rgba(5, 8, 13, 0.18)');
-      wash.addColorStop(1, 'rgba(5, 8, 13, 0.55)');
+      wash.addColorStop(0, `rgba(5, 8, 13, ${washTop})`);
+      wash.addColorStop(1, `rgba(5, 8, 13, ${washBottom})`);
       ctx.fillStyle = wash;
       ctx.fillRect(0, 0, width, height);
     }
@@ -38,7 +45,7 @@ export const layeredCanvasRenderer: SceneRenderer = {
     const t = frame.localTime;
     const motion = params.motion ?? 1.5;
     ctx.save();
-    ctx.globalAlpha = 0.22;
+    ctx.globalAlpha = overlayOpacity;
     ctx.fillStyle = accent;
     for (let i = 0; i < 4; i++) {
       const radius = width * (0.12 + i * 0.05);
@@ -51,7 +58,7 @@ export const layeredCanvasRenderer: SceneRenderer = {
     ctx.restore();
 
     ctx.save();
-    ctx.globalAlpha = 0.6;
+    ctx.globalAlpha = lineOpacity;
     ctx.strokeStyle = secondary;
     ctx.lineWidth = Math.max(1, Math.round(width * 0.0015));
     for (let line = 0; line < 7; line++) {
@@ -64,7 +71,7 @@ export const layeredCanvasRenderer: SceneRenderer = {
     ctx.restore();
 
     ctx.save();
-    ctx.globalAlpha = 0.08;
+    ctx.globalAlpha = grainOpacity;
     ctx.fillStyle = '#E9E3D2';
     const grainCount = Math.floor((width * height) / 9000);
     for (let i = 0; i < grainCount; i++) {
