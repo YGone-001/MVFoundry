@@ -43,7 +43,7 @@ const skipDirs = new Set([
  * A directory listed here is skipped in filesystem mode *only* when it holds no
  * tracked file; anything tracked inside it is reported as a finding instead.
  */
-const LOCAL_TOOL_DIRS = new Set(['.workbuddy-ai']);
+const LOCAL_TOOL_DIRS = new Set(['.workbuddy-ai', '.opencode']);
 
 const toPosix = (value) => value.split(path.sep).join('/');
 

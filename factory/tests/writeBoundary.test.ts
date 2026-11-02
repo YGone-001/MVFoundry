@@ -17,6 +17,7 @@ import assert from 'node:assert/strict';
 import {loadProject} from '../src/project/loadProject';
 import {stageProjectMedia} from '../src/media/stagePublic';
 import {sha256File} from '../src/media/hash';
+import {checkRenderBrowser} from '../src/remotion/browserReadiness';
 import {WriteBoundaryError} from '../src/errors';
 import {
   assertSafePath,
@@ -51,6 +52,33 @@ const safeJunction = (target: string, link: string): boolean => {
 
 const outputFiles = (dir: string): string[] =>
   existsSync(dir) ? readdirSync(dir).filter((name) => /\.(mp4|png)$/i.test(name)) : [];
+
+// Include directory names and every file hash: a refusal must leave the fresh
+// project byte-for-byte unchanged, without even creating an empty cache/report.
+const projectSnapshot = (root: string): string[] =>
+  readdirSync(root, {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name)).flatMap((entry) => {
+    const absolute = path.join(root, entry.name);
+    return entry.isDirectory()
+      ? [entry.name + '/', ...projectSnapshot(absolute).map((item) => entry.name + '/' + item)]
+      : [entry.name + ':' + sha256File(absolute)];
+  });
+
+const renderWithMissingExecutable = (projectId: string, frame: number, requested: string) =>
+  spawnSync(process.execPath, [
+    path.join(REPO_ROOT, 'factory', 'scripts', 'render-project.mjs'),
+    '--project', projectId, '--mode', 'still', '--frame', String(frame), '--out', requested,
+  ], {
+    cwd: REPO_ROOT,
+    env: {
+      ...process.env,
+      MV_WORKSPACE_ROOT: workspace,
+      REMOTION_BROWSER_EXECUTABLE: path.join(workspace, 'nonexistent-browser.exe'),
+      CHROME_PATH: '',
+    },
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 60000,
+  });
 
 test('G02: project-local output overrides resolve under renders', () => {
   const project = loadPixel();
@@ -111,28 +139,69 @@ test('G02: output escapes are rejected without writing', () => {
 test('G02: render CLI rejects unsafe --out before writing output', () => {
   cloneProject(workspace, 'synthetic-pixel-demo', 'cli-output-test');
   const project = loadPixel('cli-output-test');
-  const script = path.join(REPO_ROOT, 'factory', 'scripts', 'render-project.mjs');
   const outside = mkdtempSync(path.join(tmpdir(), 'mvfoundry-cli-output-'));
-  const env = {
-    ...process.env,
-    MV_WORKSPACE_ROOT: workspace,
-    REMOTION_BROWSER_EXECUTABLE: '',
-  };
+  const before = projectSnapshot(project.projectDir);
+  assert.equal(existsSync(path.join(project.projectDir, 'cache')), false);
+  assert.equal(existsSync(path.join(project.projectDir, 'reports')), false);
   try {
-    for (const requested of ['../escape.png', path.join(outside, 'escape.png')]) {
-      const result = spawnSync(
-        process.execPath,
-        [script, '--project', 'cli-output-test', '--mode', 'still', '--frame', '0', '--out', requested],
-        {cwd: REPO_ROOT, env, encoding: 'utf8', timeout: 60000},
-      );
+    for (const requested of ['../escape.png', 'nested/escape.png', path.join(outside, 'escape.png')]) {
+      const result = renderWithMissingExecutable('cli-output-test', 0, requested);
+      assert.equal(result.error, undefined);
       assert.notEqual(result.status, 0);
       assert.match(`${result.stdout}\n${result.stderr}`, /single filename|direct child|outside|forbidden/i);
+      assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /BROWSER_/);
+      assert.deepEqual(projectSnapshot(project.projectDir), before);
     }
     assert.deepEqual(outputFiles(path.join(project.projectDir, 'renders')), []);
     assert.equal(existsSync(path.join(outside, 'escape.png')), false);
   } finally {
     rmSync(outside, {recursive: true, force: true});
   }
+});
+
+test('G02: invalid still bounds precede an unavailable browser without any writes', () => {
+  cloneProject(workspace, 'synthetic-pixel-demo', 'cli-frame-test');
+  const project = loadPixel('cli-frame-test');
+  const before = projectSnapshot(project.projectDir);
+  for (const frame of [-1, 0.5, project.durationInFrames]) {
+    const result = renderWithMissingExecutable('cli-frame-test', frame, 'valid.png');
+    assert.equal(result.error, undefined);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Still frame .* is outside/);
+    assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /BROWSER_/);
+    assert.deepEqual(projectSnapshot(project.projectDir), before);
+  }
+});
+
+test('G02: valid destination with an invalid executable returns structured refusal without writes', () => {
+  cloneProject(workspace, 'synthetic-pixel-demo', 'cli-browser-test');
+  const project = loadPixel('cli-browser-test');
+  const before = projectSnapshot(project.projectDir);
+  const result = renderWithMissingExecutable('cli-browser-test', 0, 'valid.png');
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 3);
+  const refusal = JSON.parse(result.stderr.slice(result.stderr.indexOf('{')));
+  assert.equal(refusal.status, 'REFUSED');
+  assert.equal(refusal.code, 'BROWSER_EXECUTABLE_INVALID');
+  assert.equal(refusal.browser.provisioning, 'not-required');
+  assert.deepEqual(projectSnapshot(project.projectDir), before);
+});
+
+test('G02: controlled browser-less readiness refuses before a download can start', async () => {
+  let downloads = 0;
+  const missing = await checkRenderBrowser({env: {}, ensureBrowser: async () => ({type: 'no-browser'})});
+  assert.equal(missing.status, 'BROWSER_MISSING');
+  const provisioning = await checkRenderBrowser({
+    env: {},
+    ensureBrowser: async ({onBrowserDownload}) => {
+      onBrowserDownload();
+      downloads++;
+      return {type: 'no-browser'};
+    },
+  });
+  assert.equal(provisioning.status, 'BROWSER_PROVISIONING_NOT_AUTHORIZED');
+  assert.equal(provisioning.provisioning, 'refused');
+  assert.equal(downloads, 0);
 });
 
 test('G02: symlinked output destination is rejected', (t) => {

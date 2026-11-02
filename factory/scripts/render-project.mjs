@@ -57,6 +57,19 @@ const {
 
 const project = loadProject(projectId, {workspaceRoot, engineRoot: repoRoot, configPath});
 
+if (mode === 'still' && (!Number.isInteger(stillFrame) || stillFrame < 0 || stillFrame >= project.durationInFrames)) {
+  throw new Error(`Still frame ${stillFrame} is outside [0, ${project.durationInFrames})`);
+}
+
+const boundary = createProjectWriteBoundary(project, {engineRoot: repoRoot});
+// Refuse invalid destinations before browser readiness, without creating directories.
+const output = resolveRenderOutputPath(boundary, {
+  mode,
+  projectId,
+  frame: stillFrame,
+  requested: projectOut,
+});
+
 // Browser readiness is decided before staging, mixing, bundling or any frame
 // work. A missing browser is a setup problem, not a compositor failure, and it
 // must never trigger an implicit download.
@@ -90,18 +103,6 @@ if (browserReadiness.status !== 'BROWSER_READY') {
   process.exit(3);
 }
 
-if (mode === 'still' && (!Number.isInteger(stillFrame) || stillFrame < 0 || stillFrame >= project.durationInFrames)) {
-  throw new Error(`Still frame ${stillFrame} is outside [0, ${project.durationInFrames})`);
-}
-
-const boundary = createProjectWriteBoundary(project, {engineRoot: repoRoot});
-// Resolve and validate --out before any staging, cache or render write occurs.
-const output = resolveRenderOutputPath(boundary, {
-  mode,
-  projectId,
-  frame: stillFrame,
-  requested: projectOut,
-});
 const reportsDir = ensureSafeDirectory(boundary, path.join(boundary.projectRoot, 'reports'), 'project');
 const reportPath = assertSafePath(
   boundary,

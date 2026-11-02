@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
-import {mkdirSync, mkdtempSync, writeFileSync} from 'node:fs';
+import {lstatSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -65,6 +65,65 @@ const BASE_FILES = {
   'factory/src/index.ts': 'export const x = 1;\n',
 };
 const BASE_TRACKED = Object.keys(BASE_FILES);
+
+test('G21: untracked root .opencode is reported and excluded only in filesystem mode', () => {
+  const repo = buildRepo({...BASE_FILES, '.opencode/local-state.json': '{}\n'}, BASE_TRACKED);
+  const result = audit(repo);
+  assert.equal(result.pass, true, JSON.stringify(result.findings));
+  assert.deepEqual(result.skippedLocalToolDirs, ['.opencode']);
+  assert.equal(result.inventory.some((entry) => entry.path.startsWith('.opencode/')), false);
+  const candidate = audit(repo, 'candidate');
+  assert.equal(candidate.pass, true, JSON.stringify(candidate.findings));
+  assert.equal(candidate.trackedFiles, BASE_TRACKED.length);
+  assert.deepEqual(candidate.skippedLocalToolDirs, []);
+});
+
+for (const state of ['tracked', 'staged'] as const) {
+  test(`G21: ${state} root .opencode content fails filesystem and exact candidate audits`, () => {
+    const file = '.opencode/local-state.json';
+    const repo = buildRepo({...BASE_FILES, [file]: '{}\n'}, [...BASE_TRACKED, file]);
+    if (state === 'tracked') {
+      execFileSync('git', [
+        '-c', 'user.name=Synthetic audit fixture', '-c', 'user.email=fixture@example.invalid',
+        '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'Synthetic audit fixture',
+      ], {cwd: repo.root, windowsHide: true, stdio: 'pipe'});
+    }
+    for (const mode of ['filesystem', 'candidate'] as const) {
+      const result = audit(repo, mode);
+      assert.equal(result.pass, false);
+      assert.ok(result.findings.some((entry) => entry.includes(file)), JSON.stringify(result.findings));
+      assert.deepEqual(result.skippedLocalToolDirs, []);
+    }
+  });
+}
+
+test('G21: a root .opencode junction is rejected rather than skipped', () => {
+  const repo = buildRepo(BASE_FILES, BASE_TRACKED);
+  const target = mkdtempSync(path.join(tmpdir(), 'mv-audit-link-'));
+  const link = path.join(repo.root, '.opencode');
+  symlinkSync(target, link, 'junction');
+  assert.equal(lstatSync(link).isSymbolicLink(), true);
+  const result = audit(repo);
+  assert.equal(result.pass, false);
+  assert.ok(result.findings.some((entry) => /Symlink\/junction in tree: \.opencode/.test(entry)));
+  assert.deepEqual(result.skippedLocalToolDirs, []);
+});
+
+test('G21: nested .opencode and unknown hidden directories are never tool-state skips', () => {
+  const repo = buildRepo({
+    ...BASE_FILES,
+    'docs/.opencode/note.md': '# ordinary allowlisted content\n',
+    'stray/.opencode/note.md': '# unexpected nested state\n',
+    '.unknown-hidden/note.md': '# unexpected hidden state\n',
+  }, BASE_TRACKED);
+  const result = audit(repo);
+  assert.equal(result.pass, false);
+  assert.deepEqual(result.skippedLocalToolDirs, []);
+  assert.ok(result.inventory.some((entry) => entry.path === 'docs/.opencode/note.md'));
+  for (const file of ['stray/.opencode/note.md', '.unknown-hidden/note.md']) {
+    assert.ok(result.findings.some((entry) => entry.includes(file)), JSON.stringify(result.findings));
+  }
+});
 
 test('G21: a clean working tree passes and reports the local tool directory it skipped', () => {
   const repo = buildRepo(

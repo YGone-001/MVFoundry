@@ -270,6 +270,7 @@ Do not treat plans, prior reports or user summaries as proof of the current file
 - Untracked local tool directories are skipped and reported in `skippedLocalToolDirs`, never hidden. A directory that contains any tracked file is a finding, not a skip.
 - Secret scanning, absolute-path scanning, unexpected-URL-host scanning, media rejection and the allowlist checks are unchanged by that exclusion.
 - `.workbuddy-ai/` is local agent state: it must never be tracked, staged, committed or included in the publication inventory.
+- Root `.opencode/` uses that same local-tool rule only: report an untracked directory as skipped, reject tracked or staged content, and reject directory links/junctions before considering the skip. Nested `.opencode/` and other unknown hidden directories receive the normal audit. Filesystem mode observes local state; candidate mode checks the exact Git publication set and must still reject local-tool content in it.
 
 
 ### Creator onboarding, offline browser readiness and still-image intake
@@ -292,6 +293,10 @@ Do not treat plans, prior reports or user summaries as proof of the current file
 - The approved master duration and integer output-frame clock are authoritative; audio samples map to frames through the documented rounding policy and are never retimed by animation sampling.
 - Do not make one song's duration, scene count, resolution, fps or pixel profile a global constant.
 - Local rendering uses Remotion `renderFrames` plus system FFmpeg in the current environment.
+- Render refusal precedence is CLI/project validation, still-frame bounds, write-boundary creation and destination resolution, then offline browser readiness. Boundary creation and destination resolution do not create directories. Only `BROWSER_READY` permits report/cache directories, staging, audio mixing, bundling and frame work. Invalid destinations and still frames must never be masked by browser setup errors.
+- Browser detection never installs Chromium implicitly. Deterministic CLI regressions use a nonexistent explicit executable even on hosts with a managed browser cached: invalid outputs/frames win, and valid requests return exit 3 with `BROWSER_EXECUTABLE_INVALID`, leaving all project paths and source hashes unchanged. Controlled offline injection separately tests `BROWSER_MISSING` and `BROWSER_PROVISIONING_NOT_AUTHORIZED`; those statuses are not interchangeable.
+- The default project load remains strict for rendering and compiled previews. Only `stage: 'preproduction'` allows a fresh `chapters: []` project for analysis/planning; audio, assets, hashes, workspace and P0 permissions stay validated. Compilation still requires an approved storyboard with fulfilled requirements and validates its complete candidate timeline; producers and workflow previews pass through those gates before strict render loading.
+- Windows CI must run unit tests before explicit browser provisioning, and must execute the full 30-second/900-frame onboarding verification, both complete-MV suites and the workflow verifier. A skipped mandatory step is not acceptance. Closeout requires terminal CI and actual step conclusions for the exact pushed SHA before writing the excluded local Final Report under `reports/`.
 
 ### Skills and evidence
 
