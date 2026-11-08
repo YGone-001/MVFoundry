@@ -223,6 +223,26 @@ const compareTiles = reviews.flatMap((review) =>
 const compareSheet = path.join(compareDir, 'cross-style-contact-sheet.png');
 contactSheet(compareTiles, compareSheet, 5, '');
 
+// One frame per shot, both prototypes: the full-shot montage used alongside the final report.
+const SHOT_COLUMNS = [
+  {key: 'A', frame: 60, range: '0-96'},
+  {key: 'B', frame: 120, range: '96-192'},
+  {key: 'C', frame: 240, range: '192-288'},
+  {key: 'D', frame: 330, range: '288-360'},
+];
+const montageTiles = reviews.flatMap((review) =>
+  SHOT_COLUMNS.map((column) => {
+    const frame = review.frames.find((entry) => entry.frame === column.frame);
+    if (!frame) throw new Error(`Missing representative frame ${column.frame} for ${review.projectId}`);
+    return {
+      file: frame.file,
+      label: `${review.style} · shot ${column.key} (${column.range})`,
+    };
+  }),
+);
+const montageSheet = path.join(compareDir, 'all-shots-montage.png');
+contactSheet(montageTiles, montageSheet, 4, '');
+
 const mdLines = [];
 mdLines.push('# P1-G-B — Human review package: cinematic 2.5D and anime motion comic');
 mdLines.push('');
@@ -251,6 +271,7 @@ for (const review of reviews) {
   mdLines.push('');
 }
 mdLines.push(`- Cross-style comparison: \`${rel(compareSheet)}\``);
+mdLines.push(`- Full-shot montage, one frame per shot per prototype: \`${rel(montageSheet)}\``);
 mdLines.push('');
 
 mdLines.push('## Decoded technical QC');
@@ -377,6 +398,10 @@ const machine = {
   compareSheet: {
     path: rel(compareSheet),
     sha256: sha256(compareSheet),
+  },
+  montageSheet: {
+    path: rel(montageSheet),
+    sha256: sha256(montageSheet),
   },
   projects: reviews.map((review) => ({
     projectId: review.projectId,
