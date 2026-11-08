@@ -54,6 +54,27 @@ Requirements:
 - Non-WAV masters/tracks require FFmpeg to probe, decode and normalize; a missing tool fails the load or mix explicitly.
 - `REMOTION_BROWSER_EXECUTABLE` or `CHROME_PATH` can point to a browser; otherwise Remotion manages its own.
 
+## Visual styles
+
+The visual style catalog is separate from renderers and assets. See [visual styles](visual-styles.md).
+
+- `visual.style.id` is optional. Projects without it keep the legacy `styleProfile` path unchanged.
+- A style-driven project must use project Canvas modules whose `sceneModules[].styleIds` declares the selected style.
+- The module export declares the same `supportedStyles`; mismatches fail closed at bundle bind.
+- The module render context receives a frozen `style` object (id, label, optional theme roles and the full profile), or `null` for legacy modules.
+- `canvas.mode: output` gives a full-resolution Canvas 2D surface; `project-pixel` keeps integer pixels and hold-based sampling.
+- `svg`, `html` and `three` are declared `BLOCKED_CAPABILITY`; they are not selectable renderers.
+- `footage-hybrid` is the existing approved-video/layer route, not a style. A style-driven project currently requires Canvas modules for every shot.
+
+```bash
+npm run style -- list
+npm run style -- inspect --id cinematic-illustration-2p5d
+npm run style -- check --project synthetic-module-pixel-demo --workspace <external-workspace>
+npm run style:verify
+```
+
+`style:verify` renders real stills in a disposable synthetic workspace, compares decoded pixels (not just metadata), checks deterministic repeat output and verifies that an unknown style is refused without writing an output file.
+
 ## Output override policy
 
 - Default output is inside `<project>/renders/`.

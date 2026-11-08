@@ -157,6 +157,11 @@ The folder name must equal `projectId`. The loader reads only `project.json` and
 | `sceneModules[].canvas` | `{"mode":"output"}`, `{"mode":"project-pixel"}` or `{"mode":"custom","width":N,"height":N}` |
 | `sceneModules[].samplingFps` | positive integer, `output` or `project-pixel` |
 | `sceneModules[].pixelated` | optional boolean; defaults to true for non-output canvases |
+| `sceneModules[].styleIds` | optional non-empty array (max 12) of registered style ids implemented by the module |
+| `visual.style` | optional `{id, theme?, note?}`; absence preserves the legacy `styleProfile` path |
+| `visual.style.id` | registered style id with an implemented backend; required when `visual.style` is present |
+| `visual.style.theme` | optional registered theme id |
+| `visual.style.note` | optional non-empty reviewer note; not a style definition |
 | `visual.pixel` | required when any shot or the default renderer is `pixel-canvas`; internal aspect must match output |
 | `permissions.externalGeneration` | must be `false` in P0 |
 | `permissions.localOnly` | must be `true` |
@@ -168,6 +173,13 @@ The three `permissions` flags are the P0 default-deny boundary and are rejected 
 `validateProjectConfig` when they differ. There is no project-level pilot mode: a
 reviewed pilot admission lives in `generation/pilot-admission.json` and is evaluated
 only at the submission boundary, so it never changes what a project may declare.
+
+`visual.style` is an optional capability selection, not a renderer name. When it is
+present, `visual.defaultRenderer` and every shot renderer must be a declared project
+module whose `styleIds` contains the selected style; built-in renderers are refused.
+The module export must also declare that style in `supportedStyles` or the bundle
+bind fails. See [visual styles](visual-styles.md) for the registry, themes, backend
+capability status and the `footage-hybrid` production route.
 
 ## 3. Duration policy
 

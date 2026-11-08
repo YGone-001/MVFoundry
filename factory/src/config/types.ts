@@ -70,10 +70,17 @@ export type PixelProfile = {
   samplingFps: number;
 };
 
+export type VisualStyleSelection = {
+  id: string;
+  theme?: string;
+  note?: string;
+};
+
 export type VisualConfig = {
   styleProfile: string;
   defaultRenderer: string;
   pixel?: PixelProfile;
+  style?: VisualStyleSelection;
 };
 
 export type OutputConfig = {
@@ -216,6 +223,8 @@ export type SceneModuleConfig = {
   pixelated: boolean;
   label?: string;
   description?: string;
+  /** Registered visual styles this module implements. Omitted for legacy modules. */
+  styleIds?: string[];
 };
 
 export type RenderProjectSceneModule = Pick<

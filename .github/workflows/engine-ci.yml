@@ -75,6 +75,8 @@ jobs:
         run: npx remotion browser ensure
       - name: Module bundle and still render evidence
         run: npm run verify:modules
+      - name: Verify style selection changes decoded pixels and fails closed
+        run: npm run style:verify
       - name: Seed synthetic media workspace
         run: npm run media:seed
       - name: Verify Video and Hybrid renderers

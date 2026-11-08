@@ -11,9 +11,11 @@ import {
   PROJECT_SCENE_MODULE_TRUST,
   PROJECT_SCENE_MODULE_TYPE,
 } from '../scenes/external/constants';
+import {isRegisteredStyle, STYLE_IDS} from '../style/catalog';
 
 const MODULE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{2,63}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const STYLE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{2,63}$/;
 const MODULE_KEYS = new Set([
   'id',
   'path',
@@ -26,6 +28,7 @@ const MODULE_KEYS = new Set([
   'pixelated',
   'label',
   'description',
+  'styleIds',
 ]);
 
 function fail(message: string): never {
@@ -156,6 +159,27 @@ export const parseSceneModules = (raw: unknown): SceneModuleConfig[] => {
     const pixelated =
       module.pixelated === undefined ? canvas.mode !== 'output' : (module.pixelated as boolean);
 
+    let styleIds: string[] | undefined;
+    if (module.styleIds !== undefined) {
+      if (!Array.isArray(module.styleIds)) fail(`${field}.styleIds must be an array`);
+      if (module.styleIds.length === 0) fail(`${field}.styleIds must not be empty`);
+      if (module.styleIds.length > 12) fail(`${field}.styleIds may declare at most 12 styles`);
+      const seenStyles = new Set<string>();
+      styleIds = [];
+      for (const [styleIndex, entry] of module.styleIds.entries()) {
+        const styleId = text(entry, `${field}.styleIds[${styleIndex}]`);
+        if (!STYLE_ID_PATTERN.test(styleId)) {
+          fail(`${field}.styleIds[${styleIndex}] must be lowercase letters, digits and hyphens`);
+        }
+        if (seenStyles.has(styleId)) fail(`${field}.styleIds contains duplicate ${styleId}`);
+        seenStyles.add(styleId);
+        if (!isRegisteredStyle(styleId)) {
+          fail(`${field}.styleIds contains unregistered style ${styleId}; registered: ${STYLE_IDS.join(', ')}`);
+        }
+        styleIds.push(styleId);
+      }
+    }
+
     modules.push({
       id,
       path: modulePath(module.path, `${field}.path`),
@@ -168,6 +192,7 @@ export const parseSceneModules = (raw: unknown): SceneModuleConfig[] => {
       pixelated,
       label: optionalText(module.label, `${field}.label`, 120),
       description: optionalText(module.description, `${field}.description`, 1000),
+      styleIds,
     });
   }
   return modules;

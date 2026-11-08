@@ -2,6 +2,8 @@ import {ConfigValidationError} from '../errors';
 import {durationFramesFromSeconds, DURATION_POLICIES} from './duration';
 import {parseSceneModules} from './sceneModules';
 import {PROJECT_SCENE_RENDERER_PREFIX} from '../scenes/external/constants';
+import {getStyleProfile, STYLE_IDS} from '../style/catalog';
+import {isRegisteredTheme, THEME_IDS} from '../style/themes';
 import type {
   AssetApproval,
   AudioAutomationPoint,
@@ -769,9 +771,38 @@ export const validateProjectConfig = (
   const isAllowedRenderer = (kind: string): boolean =>
     moduleRendererKinds.has(kind) || (rendererKinds !== undefined && rendererKinds.has(kind));
   const defaultRenderer = text(visualRaw.defaultRenderer, 'visual.defaultRenderer');
+  const rawStyle = visualRaw.style;
+  let style: VisualConfig['style'];
+  if (rawStyle !== undefined) {
+    const styleRecord = record(rawStyle, 'visual.style');
+    const styleKeys = new Set(['id', 'theme', 'note']);
+    for (const key of Object.keys(styleRecord)) {
+      if (!styleKeys.has(key)) fail(`visual.style contains unsupported key ${key}`);
+    }
+    const styleId = text(styleRecord.id, 'visual.style.id');
+    const profile = getStyleProfile(styleId);
+    if (!profile) {
+      fail(`visual.style ${styleId} is not a registered style; registered: ${STYLE_IDS.join(', ')}`);
+    }
+    if (!profile.implementedBackends.includes('canvas2d')) {
+      fail(
+        `visual.style ${styleId} is not implemented by any available backend in this phase; implemented: ${profile.implementedBackends.join(', ')}`,
+      );
+    }
+    const themeId =
+      styleRecord.theme === undefined ? undefined : text(styleRecord.theme, 'visual.style.theme');
+    if (themeId !== undefined && !isRegisteredTheme(themeId)) {
+      fail(`visual.style.theme ${themeId} is not a registered theme; registered: ${THEME_IDS.join(', ')}`);
+    }
+    const note = styleRecord.note === undefined ? undefined : text(styleRecord.note, 'visual.style.note');
+    style = {id: styleId};
+    if (themeId !== undefined) style.theme = themeId;
+    if (note !== undefined) style.note = note;
+  }
   const visual: VisualConfig = {
     styleProfile: text(visualRaw.styleProfile, 'visual.styleProfile'),
     defaultRenderer,
+    style,
   };
   if (
     defaultRenderer.startsWith(PROJECT_SCENE_RENDERER_PREFIX) &&
@@ -781,6 +812,29 @@ export const validateProjectConfig = (
   }
   if (!isAllowedRenderer(defaultRenderer) && rendererKinds !== undefined) {
     fail(`visual.defaultRenderer is not registered: ${defaultRenderer}`);
+  }
+  if (style !== undefined) {
+    const styleId = style.id;
+    const modulesById = new Map(sceneModules.map((module) => [module.id, module]));
+    const assertShotStyle = (renderer: string, label: string): void => {
+      if (!renderer.startsWith(PROJECT_SCENE_RENDERER_PREFIX)) {
+        fail(
+          `${label} uses renderer ${renderer}, which does not declare visual style ${styleId}; style-driven projects require a project scene module with styleIds`,
+        );
+      }
+      const moduleId = renderer.slice(PROJECT_SCENE_RENDERER_PREFIX.length);
+      const module = modulesById.get(moduleId);
+      if (!module) fail(`${label} references undeclared scene module ${moduleId}`);
+      if (!module.styleIds || !module.styleIds.includes(styleId)) {
+        fail(
+          `${label} uses scene module ${moduleId}, which does not declare visual style ${styleId}; declared: ${(module.styleIds ?? []).join(', ') || 'none'}`,
+        );
+      }
+    };
+    assertShotStyle(defaultRenderer, 'visual.defaultRenderer');
+    for (const [index, shot] of allShots.entries()) {
+      assertShotStyle(shot.renderer, `shots[${index}]`);
+    }
   }
   for (const [index, shot] of allShots.entries()) {
     if (

@@ -206,6 +206,18 @@ A project may declare trusted Canvas 2D modules in `sceneModules`. The loader re
 
 The generated entry calls `bindProjectSceneModules`, which validates the exported module identity, contract version, module type, parameter schema and declared asset dependencies, then creates `project:<id>` renderers in a bundle-local registry. Default built-in renderers remain available; module kinds are namespaced and cannot replace them. Functions stay inside the bundle and are never serialized through Remotion `inputProps`.
 
+### Visual styles and backend capability
+
+`factory/src/style/catalog.ts` is a registry of visual languages, not renderers. Each profile declares composition, materials, lighting, motion, camera, typography, required asset types, compatible backends, implemented backends, output capabilities, limitations and quality expectations. `factory/src/style/themes.ts` owns optional role palettes; a theme cannot change a style's identity.
+
+- `visual.style` is optional. Legacy projects keep `visual.styleProfile` and are not reinterpreted.
+- A style-driven project requires project Canvas modules for every shot. `sceneModules[].styleIds` declares project capability, the module export declares `supportedStyles`, and the two must agree or the bundle bind fails.
+- The module render context receives a frozen `style` object, including optional theme roles and the full profile. Legacy modules receive `null`.
+- `canvas.mode: output` provides full-resolution Canvas 2D; `project-pixel` keeps integer pixels and hold-based sampling.
+- All six registered styles are implemented on Canvas 2D. `svg`, `html` and `three` are declared `BLOCKED_CAPABILITY` with concrete contract/security/determinism gaps; entering a style does not make those backends available.
+- `footage-hybrid` is documented as the existing approved video/layer production route, not a visual style. Binding a selected style to Video/Hybrid shots is not implemented in this prototype, and a style-driven project currently refuses built-in renderers.
+- `npm run style:verify` renders two styles through the same module in a disposable synthetic workspace and compares decoded raw pixels, deterministic repeats and unknown-style refusal. It is bounded CI evidence, not a full artistic demonstration.
+
 ### Trust boundary
 
 - The hash proves byte identity, not benign behavior. Importing the verified module executes its top-level code in the browser when the bundle loads; runtime identity checks happen after import.

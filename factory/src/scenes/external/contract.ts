@@ -10,6 +10,13 @@ import {SceneModuleError} from '../../errors';
 import type {SceneFrameInfo} from '../../timeline/frameClock';
 import type {CanvasSize, CanvasSceneRenderer} from '../types';
 import {
+  assertRegisteredStyle,
+  isRegisteredStyle,
+  STYLE_IDS,
+  type VisualStyleProfile,
+} from '../../style/catalog';
+import {getThemeProfile, type ThemeProfile} from '../../style/themes';
+import {
   PROJECT_SCENE_MODULE_CONTRACT_VERSION,
   PROJECT_SCENE_MODULE_TYPE,
   PROJECT_SCENE_RENDERER_PREFIX,
@@ -22,6 +29,18 @@ export type ProjectSceneModuleParameter = {
 };
 
 export type ProjectSceneAssetReference = Readonly<{publicPath: string}>;
+
+export type ProjectSceneStyleContext = {
+  id: string;
+  label: string;
+  theme: Readonly<{
+    id: string;
+    label: string;
+    mode: 'dark' | 'light';
+    roles: Readonly<ThemeProfile['roles']>;
+  }> | null;
+  profile: Readonly<VisualStyleProfile>;
+};
 
 export type ProjectSceneModuleRenderContext = {
   frame: Readonly<SceneFrameInfo>;
@@ -45,6 +64,7 @@ export type ProjectSceneModuleRenderContext = {
   params: Readonly<SceneParams>;
   moduleParams: Readonly<SceneModuleParams>;
   assets: Readonly<Record<string, ProjectSceneAssetReference>>;
+  style: Readonly<ProjectSceneStyleContext> | null;
 };
 
 export type ProjectSceneModuleDefinition = {
@@ -55,6 +75,7 @@ export type ProjectSceneModuleDefinition = {
   assetDependencies?: readonly string[];
   label?: string;
   description?: string;
+  supportedStyles?: readonly string[];
   render: (
     ctx: CanvasRenderingContext2D,
     context: ProjectSceneModuleRenderContext,
@@ -69,6 +90,7 @@ export type ProjectSceneModuleBinding = {
   canvas: SceneModuleCanvasConfig;
   samplingFps: SceneModuleSampling;
   pixelated: boolean;
+  styleIds?: readonly string[];
 };
 
 const MODULE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{2,63}$/;
@@ -135,6 +157,21 @@ const assertBinding = (binding: ProjectSceneModuleBinding): void => {
   if (typeof binding.pixelated !== 'boolean') {
     fail(`Invalid pixelated flag for scene module ${binding.id}`);
   }
+  if (binding.styleIds !== undefined) {
+    if (!Array.isArray(binding.styleIds) || binding.styleIds.length === 0) {
+      fail(`Scene module ${binding.id} styleIds must be a non-empty array when present`);
+    }
+    const seenStyles = new Set<string>();
+    for (const styleId of binding.styleIds) {
+      if (typeof styleId !== 'string' || !isRegisteredStyle(styleId)) {
+        fail(`Scene module ${binding.id} declares unknown style ${String(styleId)}`);
+      }
+      if (seenStyles.has(styleId)) {
+        fail(`Scene module ${binding.id} declares duplicate style ${styleId}`);
+      }
+      seenStyles.add(styleId);
+    }
+  }
 };
 
 const readParameters = (
@@ -190,6 +227,26 @@ const readAssetDependencies = (
   return result;
 };
 
+const readSupportedStyles = (value: unknown, moduleId: string): string[] => {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) fail(`Scene module ${moduleId} supportedStyles must be an array`);
+  if (value.length > 12) fail(`Scene module ${moduleId} declares too many supported styles`);
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const [index, entry] of value.entries()) {
+    const styleId = text(entry, `Scene module ${moduleId} supportedStyles[${index}]`);
+    if (!isRegisteredStyle(styleId)) {
+      fail(
+        `Scene module ${moduleId} declares unregistered style ${styleId}; registered: ${STYLE_IDS.join(', ')}`,
+      );
+    }
+    if (seen.has(styleId)) fail(`Scene module ${moduleId} declares duplicate style ${styleId}`);
+    seen.add(styleId);
+    result.push(styleId);
+  }
+  return result;
+};
+
 export const readProjectSceneModule = (
   imported: unknown,
   binding: ProjectSceneModuleBinding,
@@ -215,12 +272,23 @@ export const readProjectSceneModule = (
     binding.id,
     approvedAssetIds,
   );
+  const supportedStyles = readSupportedStyles(module.supportedStyles, binding.id);
+  if (binding.styleIds !== undefined) {
+    for (const styleId of binding.styleIds) {
+      if (!supportedStyles.includes(styleId)) {
+        fail(
+          `Scene module ${binding.id} declares style ${styleId} in the project manifest but does not export supportedStyles containing it`,
+        );
+      }
+    }
+  }
   const definition: ProjectSceneModuleDefinition = {
     id: binding.id,
     contractVersion: binding.contractVersion,
     moduleType: binding.moduleType,
     params: Object.freeze(parameters),
     assetDependencies: Object.freeze(assetDependencies),
+    supportedStyles: Object.freeze(supportedStyles),
     render: module.render as ProjectSceneModuleDefinition['render'],
   };
   if (typeof module.label === 'string') definition.label = module.label;
@@ -314,6 +382,37 @@ const collectAssets = (
   return Object.freeze(result);
 };
 
+const resolveActiveStyle = (
+  project: RenderProjectSnapshot,
+  definition: ProjectSceneModuleDefinition,
+): ProjectSceneStyleContext | null => {
+  const selection = project.visual.style;
+  if (!selection) return null;
+  const profile = assertRegisteredStyle(selection.id);
+  if (!definition.supportedStyles || !definition.supportedStyles.includes(selection.id)) {
+    fail(
+      `Scene module ${definition.id} does not implement active style ${selection.id}; exported: ${(definition.supportedStyles ?? []).join(', ') || 'none'}`,
+    );
+  }
+  const theme = selection.theme ? getThemeProfile(selection.theme) : undefined;
+  if (selection.theme && !theme) {
+    fail(`Project selects unregistered theme ${selection.theme}`);
+  }
+  return Object.freeze({
+    id: profile.id,
+    label: profile.label,
+    theme: theme
+      ? Object.freeze({
+          id: theme.id,
+          label: theme.label,
+          mode: theme.mode,
+          roles: Object.freeze({...theme.roles}),
+        })
+      : null,
+    profile,
+  });
+};
+
 export const createProjectSceneRenderer = (
   binding: ProjectSceneModuleBinding,
   definition: ProjectSceneModuleDefinition,
@@ -326,6 +425,7 @@ export const createProjectSceneRenderer = (
     const moduleParams = validateModuleParams(definition, context.shot);
     const assets = collectAssets(definition, context.project, context.publicAssets);
     const canvas = resolveProjectSceneCanvas(binding, context.project);
+    const style = resolveActiveStyle(context.project, definition);
     const moduleContext: ProjectSceneModuleRenderContext = Object.freeze({
       frame: Object.freeze({...context.frame}),
       canvas: Object.freeze({width: canvas.width, height: canvas.height}),
@@ -345,6 +445,7 @@ export const createProjectSceneRenderer = (
       params: Object.freeze({...context.shot.params}),
       moduleParams,
       assets,
+      style,
     });
     try {
       definition.render(ctx, moduleContext);

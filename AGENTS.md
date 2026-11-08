@@ -284,6 +284,18 @@ Do not treat plans, prior reports or user summaries as proof of the current file
 - Command-line text is owned by the parent shell's encoding. Non-ASCII song titles, artist names, provenance and rights statements are supplied with `--metadata-file <utf8-json>`: the document is decoded as strict UTF-8, unknown keys are rejected, and a field declared twice with differing values is refused. The engine never scans folders for metadata.
 - `layered-canvas` keeps its historical grade exactly when the per-shot `washTop`, `washBottom`, `overlayOpacity`, `lineOpacity` and `grainOpacity` parameters are omitted (0.18, 0.55, 0.22, 0.6, 0.08). An explicit low-wash configuration preserves more of the creator image's colour; it never changes timing, audio, asset identity, source hashes or renderer family, and a measured saturation increase is not an artistic approval.
 
+### Visual styles and renderer backends
+
+- Visual style, rendering backend and asset production are separate concepts. A style is a visual language, not a renderer and not a palette. All six registered P1-G-A styles currently execute on Canvas 2D and must produce structurally different images.
+- `factory/src/style/catalog.ts` is the style registry; `factory/src/style/themes.ts` owns optional role themes. `visual.style` is optional and legacy projects keep `visual.styleProfile` unchanged. There is no breaking schema migration.
+- A style-driven project must use project Canvas modules for every shot. `sceneModules[].styleIds` declares the project capability and the module export must declare matching `supportedStyles`; a mismatch fails closed at bundle bind.
+- The module render context receives a frozen `style` object with the active id, label, optional theme roles and the full profile. Legacy modules receive `null`; the engine never invents a default style.
+- `canvas.mode: output` is full-resolution Canvas 2D; `project-pixel` keeps integer pixels and hold-based sampling. Changing `visual.style.id` must change actual output, not only metadata.
+- `svg`, `html` and `three` are `BLOCKED_CAPABILITY` in this phase: no reviewed SVG/HTML contract or sanitizer and no WebGL determinism/headless policy. A compatible-backend label never implies an implemented backend, and a blocked backend must not be selectable.
+- `footage-hybrid` is the existing approved video/layer production route, not a style. Binding a selected style to Video/Hybrid shots is not implemented; a style-driven project currently refuses built-in renderers. Do not fake that capability.
+- `npm run style:verify` creates a disposable synthetic project, renders two styles through the same module, compares decoded raw pixels, checks deterministic repeats and verifies unknown-style refusal with no output file. A full gallery or a valid still does not establish human artistic approval.
+- The six-style gallery, boards, frames, videos and quality records stay in the external workspace. Missing fidelity must be disclosed (`BLOCKED_CAPABILITY` or an asset limitation), never replaced by a style label.
+
 ### Timeline and rendering
 
 - Integer output frames are the canonical editing clock; scene ranges are half-open `[startFrame, endFrame)`.
@@ -363,6 +375,10 @@ npm run preproduction -- attach-asset --project synthetic-mixed-timeline-demo --
 npm run preproduction -- review-asset --project synthetic-mixed-timeline-demo --requirement REQ-001 --decision approve --notes "<review>"
 npm run render:project -- --project synthetic-pixel-demo --mode video --frames 0-23
 npm run render:project -- --project synthetic-module-pixel-demo --mode video --frames 0-47
+npm run style -- list
+npm run style -- inspect --id cinematic-illustration-2p5d
+npm run style -- check --project synthetic-module-pixel-demo --workspace <external-workspace>
+npm run style:verify
 npm run verify:modules
 npm run audit:git
 npm run audit:publication
@@ -412,4 +428,4 @@ Local reports/ only
 
 ## Scope boundary
 
-The reusable engine supports declarative renderers, trusted project-local Canvas 2D scene modules, local Video/Hybrid media composition, multi-format audio ingestion, frame-locked multitrack mixing, deterministic cue analysis, a song-independent beat/section/lyrics/director/storyboard preproduction workflow, media-aware shot planning with production tasks, local asset handoff and declarative continuity. It does not start a real music-video production, generate media with AI, transcribe or fetch lyrics, migrate a private production, call providers, implement semantic music understanding, recognize visual identity in pixels, or publish production scenes. Stop before unauthorized provider, publication or production work.
+The reusable engine supports declarative renderers, a validated visual-style catalog with optional themes, trusted project-local Canvas 2D scene modules, local Video/Hybrid media composition, multi-format audio ingestion, frame-locked multitrack mixing, deterministic cue analysis, a song-independent beat/section/lyrics/director/storyboard preproduction workflow, media-aware shot planning with production tasks, local asset handoff and declarative continuity. It does not start a real music-video production, generate media with AI, transcribe or fetch lyrics, migrate a private production, call providers, implement semantic music understanding, recognize visual identity in pixels, or publish production scenes. Stop before unauthorized provider, publication or production work.

@@ -14,6 +14,7 @@ MVFoundry provides:
 - strict external-workspace isolation;
 - integer output-frame timing with renderer-specific sampling;
 - a typed scene registry and renderer adapters;
+- a validated, optional visual-style catalog that separates visual language from rendering backend and asset production;
 - local, hash-checked media resolution;
 - a generic Remotion composition and local render scripts;
 - agent Skills for direction, visual continuity, shot production, composition and acceptance.
@@ -71,6 +72,7 @@ It does not include any song, recording, lyrics, reference image, production sce
   - `video` — approved local H.264 MP4 playback with shot-local source in-point, fit/scale and muted source audio.
   - `hybrid` — video background, transparent PNG layers and deterministic Canvas overlay in explicit layer order.
   - `project:<id>` — trusted, hash-verified Canvas 2D scene modules declared by the external project.
+- Visual styles: six registered Canvas 2D profiles (`cinematic-illustration-2p5d`, `anime-motion-comic`, `ink-watercolor`, `editorial-motion-graphics`, `stylized-3d-diorama`, `retro-pixel`), optional themes, project/module style capability binding, and a real-pixel `style:verify` regression. `svg`, `html` and `three` remain blocked capabilities; `footage-hybrid` is an approved-media production route, not a style. See [visual styles](docs/visual-styles.md).
 - Approved-asset staging into the external project cache and Remotion `publicDir`.
 - Local FFprobe validation of approved video metadata and PNG layer alpha metadata before rendering.
 - Per-project staged Remotion entries and local bundles that never copy project scene source into this repository.
@@ -211,6 +213,8 @@ Set `REMOTION_BROWSER_EXECUTABLE` or `CHROME_PATH` if Remotion cannot locate a b
 | `project:<id>` | implemented for trusted Canvas 2D scene modules |
 | `video` | implemented for approved local H.264 MP4 sources |
 | `hybrid` | implemented for video + transparent PNG + Canvas overlay |
+
+Visual styles are orthogonal to these renderers. A registered style is a visual language implemented by a project Canvas module; it is not another renderer. `svg`, `html` and `three` are not implemented adapters and are reported as `BLOCKED_CAPABILITY`. See [visual styles](docs/visual-styles.md).
 
 Project-local TypeScript/TSX modules are supported through an explicit manifest and a per-project staged Remotion entry. Modules are executable local code and are trusted only after explicit user approval and hash verification. See §13.
 

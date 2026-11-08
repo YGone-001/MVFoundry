@@ -51,6 +51,7 @@ const entryContents = (
     canvas: module.canvas,
     samplingFps: module.samplingFps,
     pixelated: module.pixelated,
+    styleIds: module.styleIds,
   }));
   const approvedAssetIds = project.assets
     .filter((asset) => asset.approval === 'approved')
