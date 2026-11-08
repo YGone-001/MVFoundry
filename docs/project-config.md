@@ -341,6 +341,78 @@ Source FPS may differ from output FPS; Remotion's decoder maps shot-local output
 
 The synthetic templates are under `factory/examples/media-projects/`. They are templates, not loadable manifests; `npm run media:seed` generates media and writes hash-approved `project.json` files into an external workspace. Generated media is not committed.
 
+### 4.3 Asset-backed 2.5D shot media
+
+`parallax-2p5d` shots require a `parallax-2p5d` media object:
+
+```json
+{
+  "kind": "parallax-2p5d",
+  "background": {
+    "kind": "image",
+    "assetId": "BG-STREET",
+    "opacity": 1,
+    "fit": "cover",
+    "parallax": 0.05,
+    "blur": 2.2
+  },
+  "layers": [
+    {"assetId": "MG-PLATFORM", "role": "midground", "order": 10, "parallax": 0.3, "blur": 0.8},
+    {"assetId": "SUBJ-WOMAN", "role": "subject", "order": 20, "parallax": 0.62},
+    {"assetId": "FG-RAIL", "role": "foreground", "order": 30, "parallax": 0.95, "blur": 3.2}
+  ],
+  "camera": {
+    "kind": "pan",
+    "fromX": 0.03, "fromY": 0.01, "fromZoom": 1.02,
+    "toX": -0.03, "toY": -0.005, "toZoom": 1.02,
+    "easing": "easeInOut"
+  },
+  "atmosphere": {"kind": "rain-mist", "intensity": 0.7, "windX": -0.1},
+  "light": {"amplitude": 0.1, "frequency": 0.55, "phase": 0.15},
+  "grade": {"saturation": 1.06, "contrast": 1.08},
+  "comic": {"motionStepFps": 8, "halftone": 0.35, "speedLines": 0.2}
+}
+```
+
+Background rules:
+
+- `kind` is `image` or `video`. `image` requires an approved asset of kind `image`; `video` requires an approved asset of kind `video` plus the video source fields above.
+- `parallax` is `0..0.12`. `opacity` is `[0,1]`; `scale` is `(0,20]`; `blur` is `0..16`.
+- A `video` background also honours the whole video source contract (`endBehavior: reject`, `muted: true`, frame-aligned `sourceStartSeconds`).
+
+Layer rules:
+
+- Each `assetId` must be an approved asset of kind `layer` and an alpha-capable PNG.
+- `role` is `midground`, `subject` or `foreground`. At least one midground and one foreground layer are required.
+- `parallax` ranges are role-scoped: midground `0.10-0.60`, subject `0.45-0.90`, foreground `0.80-1.00`. The span between the nearest and farthest depth must be at least `0.25`.
+- `order` is an integer `0..31`, unique, and role rank must not decrease as order increases (background → midground → subject → foreground).
+- `motion` is optional: `translateXFrom/To` and `translateYFrom/To` in frame-width/height fractions, each within ±0.7, plus optional `fromFrame`, `toFrame` and `easing`. A motion block that declares no movement is rejected; omit it instead.
+- `visibleFromFrame`/`visibleToFrame` are half-open shot-local ranges that must not exceed the shot length.
+
+Camera rules:
+
+- `camera`, `atmosphere` and `light` objects are required; an empty `atmosphere` object means `none`.
+- `kind` is `pan`, `push-in`, `pull-back` or `hold`; `x`/`y` are frame fractions within ±0.25; `fromZoom`/`toZoom` are `1..2.5`.
+- A `pan` requires constant zoom and a non-zero lateral move; `push-in` requires increasing zoom; `pull-back` requires decreasing zoom; `hold` requires a fully static path.
+
+Treatment rules:
+
+- `atmosphere.kind` is `rain`, `mist`, `rain-mist` or `none`; `intensity` is `[0,1]`; `windX` is `[-0.4,0.4]`.
+- `light.amplitude` is `[0,0.35]`, `frequency` `[0,8]`, `phase` `[0,1]`; `sweep` needs `fromX`/`toX` that differ, `width` `0.02..1` and an optional `#rrggbb` colour.
+- `grade` overrides the style's declared `gradeBias`; all numeric values are bounded and colours must be `#rrggbb`.
+- `comic` is allowed only when the selected style declares `comic-treatment`. `motionStepFps` is `1..fps`; impacts and wipes are sorted, bounded and must fall inside the shot.
+
+Media validation sequence for this route:
+
+1. Manifest, approval and kind checks, including the required midground/foreground tiers.
+2. Role ordering, parallax ranges, depth span, camera bounds and treatment bounds.
+3. Project-relative asset path, hash verification and staging.
+4. PNG probe for the background plate, on projects that use this route only.
+5. Layer PNG alpha probe and video probe for footage plates.
+6. Timeline validation for a footage plate under `reject`.
+
+The engine never falls back to another renderer for a failed 2.5D shot.
+
 ## 5. Audio master and tracks
 
 ### 5.1 Master soundtrack authority

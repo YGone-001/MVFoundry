@@ -2,22 +2,48 @@ import {ConfigValidationError} from '../errors';
 import {durationFramesFromSeconds, DURATION_POLICIES} from './duration';
 import {parseSceneModules} from './sceneModules';
 import {PROJECT_SCENE_RENDERER_PREFIX} from '../scenes/external/constants';
-import {getStyleProfile, STYLE_IDS} from '../style/catalog';
+import {
+  getStyleMediaRoute,
+  getStyleProfile,
+  MEDIA_RENDERER_KINDS,
+  STYLE_IDS,
+  styleMediaRouteSupports,
+  type MediaRendererKind,
+  type VisualStyleProfile,
+} from '../style/catalog';
 import {isRegisteredTheme, THEME_IDS} from '../style/themes';
+import {
+  CAMERA_AMPLITUDE_LIMIT,
+  LAYER_MOTION_LIMIT,
+  ROLE_ORDER,
+  ROLE_PARALLAX_RANGES,
+} from '../scenes/parallaxMath';
 import type {
   AssetApproval,
+  AtmosphereConfig,
   AudioAutomationPoint,
   AudioConfig,
   AudioFormat,
   AudioTrackConfig,
   AudioTrackRole,
+  CameraMoveConfig,
   Chapter,
+  ComicImpactFrame,
+  ComicPanelWipe,
+  ComicTreatmentConfig,
   Cue,
   CueSource,
+  GradeConfig,
   HybridLayerConfig,
   HybridOverlayConfig,
+  LayerMotionConfig,
+  LightVariationConfig,
+  LightSweepConfig,
   MediaFit,
   NarrativeMode,
+  ParallaxBackgroundConfig,
+  ParallaxLayerConfig,
+  ParallaxLayerRole,
   ProjectAsset,
   ProjectAssetKind,
   ProjectConfig,
@@ -26,6 +52,7 @@ import type {
   Shot,
   ShotHybridMedia,
   ShotMediaConfig,
+  ShotParallaxMedia,
   ShotVideoMedia,
   VideoSourceConfig,
   VisualConfig,
@@ -38,7 +65,9 @@ const APPROVALS: readonly AssetApproval[] = ['approved', 'pending', 'rejected', 
 const AUDIO_FORMATS: readonly AudioFormat[] = ['wav-pcm', 'mp3', 'flac', 'm4a-aac'];
 const AUDIO_ROLES: readonly AudioTrackRole[] = ['sfx', 'voiceover', 'ambience'];
 const MEDIA_FITS: readonly MediaFit[] = ['contain', 'cover'];
-const MEDIA_RENDERERS = new Set(['video', 'hybrid']);
+const MEDIA_RENDERERS = new Set<string>([...MEDIA_RENDERER_KINDS]);
+const PARALLAX_ROLES: readonly ParallaxLayerRole[] = ['midground', 'subject', 'foreground'];
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 const PROJECT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{2,63}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -361,6 +390,527 @@ const validateOverlay = (value: unknown, field: string): HybridOverlayConfig => 
   return {kind, intensity, color};
 };
 
+const numberInRange = (
+  value: unknown,
+  field: string,
+  minimum: number,
+  maximum: number,
+): number => {
+  const parsed = number(value, field);
+  if (parsed < minimum || parsed > maximum) {
+    fail(`${field} must be in [${minimum}, ${maximum}], received ${parsed}`);
+  }
+  return parsed;
+};
+
+const optionalNumberInRange = (
+  value: unknown,
+  field: string,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number => (value === undefined ? fallback : numberInRange(value, field, minimum, maximum));
+
+const color = (value: unknown, field: string): string => {
+  const parsed = text(value, field);
+  if (!HEX_COLOR.test(parsed)) fail(`${field} must be a #rrggbb colour`);
+  return parsed.toLowerCase();
+};
+
+const validateLayerMotion = (value: unknown, field: string): LayerMotionConfig => {
+  const motion = record(value, field);
+  assertKeys(
+    motion,
+    [
+      'translateXFrom',
+      'translateXTo',
+      'translateYFrom',
+      'translateYTo',
+      'fromFrame',
+      'toFrame',
+      'easing',
+    ],
+    field,
+  );
+  const translateXFrom = numberInRange(
+    motion.translateXFrom,
+    `${field}.translateXFrom`,
+    -LAYER_MOTION_LIMIT,
+    LAYER_MOTION_LIMIT,
+  );
+  const translateXTo = numberInRange(
+    motion.translateXTo,
+    `${field}.translateXTo`,
+    -LAYER_MOTION_LIMIT,
+    LAYER_MOTION_LIMIT,
+  );
+  const translateYFrom = numberInRange(
+    motion.translateYFrom,
+    `${field}.translateYFrom`,
+    -LAYER_MOTION_LIMIT,
+    LAYER_MOTION_LIMIT,
+  );
+  const translateYTo = numberInRange(
+    motion.translateYTo,
+    `${field}.translateYTo`,
+    -LAYER_MOTION_LIMIT,
+    LAYER_MOTION_LIMIT,
+  );
+  const fromFrame =
+    motion.fromFrame === undefined ? undefined : integer(motion.fromFrame, `${field}.fromFrame`, 0);
+  const toFrame =
+    motion.toFrame === undefined ? undefined : integer(motion.toFrame, `${field}.toFrame`, 0);
+  if (fromFrame !== undefined && toFrame !== undefined && fromFrame >= toFrame) {
+    fail(`${field} requires fromFrame < toFrame`);
+  }
+  if (
+    Math.abs(translateXFrom - translateXTo) < 1e-9 &&
+    Math.abs(translateYFrom - translateYTo) < 1e-9
+  ) {
+    fail(`${field} declares no movement; omit motion for a static layer`);
+  }
+  return {
+    translateXFrom,
+    translateXTo,
+    translateYFrom,
+    translateYTo,
+    ...(fromFrame === undefined ? {} : {fromFrame}),
+    ...(toFrame === undefined ? {} : {toFrame}),
+    easing: oneOf(
+      motion.easing === undefined ? 'easeInOut' : motion.easing,
+      ['linear', 'easeInOut'] as const,
+      `${field}.easing`,
+    ),
+  };
+};
+
+const validateParallaxLayer = (
+  value: unknown,
+  field: string,
+  assetById: ReadonlyMap<string, ProjectAsset>,
+  shotLength: number,
+): ParallaxLayerConfig => {
+  const layer = record(value, field);
+  assertKeys(
+    layer,
+    [
+      'assetId',
+      'role',
+      'order',
+      'parallax',
+      'opacity',
+      'fit',
+      'positionX',
+      'positionY',
+      'scale',
+      'visibleFromFrame',
+      'visibleToFrame',
+      'motion',
+      'blur',
+    ],
+    field,
+  );
+  const assetId = text(layer.assetId, `${field}.assetId`);
+  assertApprovedAssetKind(assetById, assetId, 'layer', `${field}.assetId`);
+  const role = oneOf(layer.role, PARALLAX_ROLES, `${field}.role`);
+  const range = ROLE_PARALLAX_RANGES[role];
+  const parallax = numberInRange(layer.parallax, `${field}.parallax`, range.min, range.max);
+  const order = integer(layer.order, `${field}.order`, 0);
+  if (order > 31) fail(`${field}.order must be at most 31`);
+  const opacity = optionalNumberInRange(layer.opacity, `${field}.opacity`, 1, 0, 1);
+  const blur = optionalNumberInRange(layer.blur, `${field}.blur`, 0, 0, 16);
+  const fit = oneOf(layer.fit === undefined ? 'cover' : layer.fit, MEDIA_FITS, `${field}.fit`);
+  const positionX = optionalNumber(layer.positionX, `${field}.positionX`, 0);
+  const positionY = optionalNumber(layer.positionY, `${field}.positionY`, 0);
+  const scale = optionalNumber(layer.scale, `${field}.scale`, 1);
+  if (!(scale > 0) || scale > 20) fail(`${field}.scale must be greater than 0 and at most 20`);
+  const visibleFromFrame = integer(layer.visibleFromFrame ?? 0, `${field}.visibleFromFrame`, 0);
+  const visibleToFrame = integer(
+    layer.visibleToFrame ?? shotLength,
+    `${field}.visibleToFrame`,
+    0,
+  );
+  if (visibleFromFrame >= visibleToFrame) fail(`${field} visibility range must be non-empty`);
+  if (visibleToFrame > shotLength) {
+    fail(`${field}.visibleToFrame exceeds the shot-local duration ${shotLength}`);
+  }
+  const motion =
+    layer.motion === undefined ? undefined : validateLayerMotion(layer.motion, `${field}.motion`);
+  return {
+    assetId,
+    role,
+    order,
+    parallax,
+    opacity,
+    fit,
+    positionX,
+    positionY,
+    scale,
+    visibleFromFrame,
+    visibleToFrame,
+    blur,
+    ...(motion === undefined ? {} : {motion}),
+  };
+};
+
+const validateParallaxBackground = (
+  value: unknown,
+  field: string,
+  assetById: ReadonlyMap<string, ProjectAsset>,
+  fps: number,
+): ParallaxBackgroundConfig => {
+  const background = record(value, field);
+  const kind = oneOf(background.kind, ['image', 'video'] as const, `${field}.kind`);
+  if (kind === 'image') {
+    assertKeys(
+      background,
+      ['kind', 'assetId', 'opacity', 'fit', 'positionX', 'positionY', 'scale', 'parallax', 'blur'],
+      field,
+    );
+    const assetId = text(background.assetId, `${field}.assetId`);
+    assertApprovedAssetKind(assetById, assetId, 'image', `${field}.assetId`);
+    const parallax = numberInRange(background.parallax, `${field}.parallax`, 0, 0.12);
+    return {
+      kind: 'image',
+      assetId,
+      opacity: optionalNumberInRange(background.opacity, `${field}.opacity`, 1, 0, 1),
+      fit: oneOf(background.fit === undefined ? 'cover' : background.fit, MEDIA_FITS, `${field}.fit`),
+      positionX: optionalNumber(background.positionX, `${field}.positionX`, 0),
+      positionY: optionalNumber(background.positionY, `${field}.positionY`, 0),
+      scale: optionalNumberInRange(background.scale, `${field}.scale`, 1, 0.05, 20),
+      parallax,
+      blur: optionalNumberInRange(background.blur, `${field}.blur`, 0, 0, 16),
+    };
+  }
+  const video = validateVideoSource(background, field, assetById, fps, [
+    'kind',
+    'opacity',
+    'parallax',
+    'blur',
+  ]);
+  return {
+    ...video,
+    kind: 'video',
+    opacity: optionalNumberInRange(background.opacity, `${field}.opacity`, 1, 0, 1),
+    parallax: numberInRange(background.parallax, `${field}.parallax`, 0, 0.12),
+    blur: optionalNumberInRange(background.blur, `${field}.blur`, 0, 0, 16),
+  };
+};
+
+const validateCameraMove = (value: unknown, field: string): CameraMoveConfig => {
+  const camera = record(value, field);
+  assertKeys(
+    camera,
+    ['kind', 'fromX', 'fromY', 'fromZoom', 'toX', 'toY', 'toZoom', 'easing'],
+    field,
+  );
+  const kind = oneOf(
+    camera.kind,
+    ['pan', 'push-in', 'pull-back', 'hold'] as const,
+    `${field}.kind`,
+  );
+  const limit = CAMERA_AMPLITUDE_LIMIT;
+  const fromX = numberInRange(camera.fromX, `${field}.fromX`, -limit, limit);
+  const fromY = numberInRange(camera.fromY, `${field}.fromY`, -limit, limit);
+  const toX = numberInRange(camera.toX, `${field}.toX`, -limit, limit);
+  const toY = numberInRange(camera.toY, `${field}.toY`, -limit, limit);
+  const fromZoom = numberInRange(camera.fromZoom, `${field}.fromZoom`, 1, 2.5);
+  const toZoom = numberInRange(camera.toZoom, `${field}.toZoom`, 1, 2.5);
+  const easing = oneOf(
+    camera.easing === undefined ? 'easeInOut' : camera.easing,
+    ['linear', 'easeInOut'] as const,
+    `${field}.easing`,
+  );
+  const travel = Math.abs(toX - fromX) + Math.abs(toY - fromY);
+  const zoomDelta = toZoom - fromZoom;
+  if (kind === 'pan') {
+    if (Math.abs(zoomDelta) > 1e-9) fail(`${field}.kind pan requires a constant zoom`);
+    if (travel < 1e-6) fail(`${field}.kind pan requires a non-zero horizontal or vertical pan`);
+  } else if (kind === 'push-in') {
+    if (!(zoomDelta > 1e-6)) fail(`${field}.kind push-in requires toZoom > fromZoom`);
+  } else if (kind === 'pull-back') {
+    if (!(zoomDelta < -1e-6)) fail(`${field}.kind pull-back requires toZoom < fromZoom`);
+  } else if (travel > 1e-6 || Math.abs(zoomDelta) > 1e-6) {
+    fail(`${field}.kind hold requires an unmoving camera`);
+  }
+  return {kind, fromX, fromY, fromZoom, toX, toY, toZoom, easing};
+};
+
+const validateAtmosphere = (value: unknown, field: string): AtmosphereConfig => {
+  const atmosphere = record(value, field);
+  assertKeys(atmosphere, ['kind', 'intensity', 'windX'], field);
+  return {
+    kind: oneOf(
+      atmosphere.kind === undefined ? 'none' : atmosphere.kind,
+      ['rain', 'mist', 'rain-mist', 'none'] as const,
+      `${field}.kind`,
+    ),
+    intensity: optionalNumberInRange(atmosphere.intensity, `${field}.intensity`, 0, 0, 1),
+    windX: optionalNumberInRange(atmosphere.windX, `${field}.windX`, 0, -0.4, 0.4),
+  };
+};
+
+const validateLightSweep = (value: unknown, field: string): LightSweepConfig => {
+  const sweep = record(value, field);
+  assertKeys(sweep, ['intensity', 'fromX', 'toX', 'width', 'color'], field);
+  const fromX = numberInRange(sweep.fromX, `${field}.fromX`, -1, 2);
+  const toX = numberInRange(sweep.toX, `${field}.toX`, -1, 2);
+  if (Math.abs(toX - fromX) < 1e-6) fail(`${field} must travel between fromX and toX`);
+  return {
+    intensity: numberInRange(sweep.intensity, `${field}.intensity`, 0, 1),
+    fromX,
+    toX,
+    width: numberInRange(sweep.width, `${field}.width`, 0.02, 1),
+    ...(sweep.color === undefined ? {} : {color: color(sweep.color, `${field}.color`)}),
+  };
+};
+
+const validateLightVariation = (value: unknown, field: string): LightVariationConfig => {
+  const light = record(value, field);
+  assertKeys(light, ['amplitude', 'frequency', 'phase', 'sweep'], field);
+  return {
+    amplitude: optionalNumberInRange(light.amplitude, `${field}.amplitude`, 0, 0, 0.35),
+    frequency: optionalNumberInRange(light.frequency, `${field}.frequency`, 0, 0, 8),
+    phase: optionalNumberInRange(light.phase, `${field}.phase`, 0, 0, 1),
+    ...(light.sweep === undefined
+      ? {}
+      : {sweep: validateLightSweep(light.sweep, `${field}.sweep`)}),
+  };
+};
+
+const validateGrade = (value: unknown, field: string): Partial<GradeConfig> | undefined => {
+  if (value === undefined) return undefined;
+  const grade = record(value, field);
+  assertKeys(
+    grade,
+    ['saturation', 'contrast', 'brightness', 'tint', 'tintOpacity', 'vignette', 'grain'],
+    field,
+  );
+  const result: Partial<GradeConfig> = {};
+  if (grade.saturation !== undefined) {
+    result.saturation = numberInRange(grade.saturation, `${field}.saturation`, 0.2, 2.5);
+  }
+  if (grade.contrast !== undefined) {
+    result.contrast = numberInRange(grade.contrast, `${field}.contrast`, 0.2, 2.5);
+  }
+  if (grade.brightness !== undefined) {
+    result.brightness = numberInRange(grade.brightness, `${field}.brightness`, 0.4, 2.2);
+  }
+  if (grade.tint !== undefined) result.tint = color(grade.tint, `${field}.tint`);
+  if (grade.tintOpacity !== undefined) {
+    result.tintOpacity = numberInRange(grade.tintOpacity, `${field}.tintOpacity`, 0, 0.5);
+  }
+  if (grade.vignette !== undefined) {
+    result.vignette = numberInRange(grade.vignette, `${field}.vignette`, 0, 1);
+  }
+  if (grade.grain !== undefined) {
+    result.grain = numberInRange(grade.grain, `${field}.grain`, 0, 0.4);
+  }
+  return result;
+};
+
+const validateComicTreatment = (
+  value: unknown,
+  field: string,
+  shotLength: number,
+  fps: number,
+): Partial<ComicTreatmentConfig> => {
+  const comic = record(value, field);
+  assertKeys(
+    comic,
+    ['motionStepFps', 'halftone', 'speedLines', 'panel', 'impacts', 'wipes'],
+    field,
+  );
+  const result: Partial<ComicTreatmentConfig> = {};
+  if (comic.motionStepFps !== undefined) {
+    const step = integer(comic.motionStepFps, `${field}.motionStepFps`, 1);
+    if (step > fps) fail(`${field}.motionStepFps must not exceed the output fps ${fps}`);
+    result.motionStepFps = step;
+  }
+  if (comic.halftone !== undefined) {
+    result.halftone = numberInRange(comic.halftone, `${field}.halftone`, 0, 1);
+  }
+  if (comic.speedLines !== undefined) {
+    result.speedLines = numberInRange(comic.speedLines, `${field}.speedLines`, 0, 1);
+  }
+  if (comic.panel !== undefined) {
+    const panel = record(comic.panel, `${field}.panel`);
+    assertKeys(panel, ['gutter', 'color', 'inset'], `${field}.panel`);
+    const gutter = numberInRange(panel.gutter, `${field}.panel.gutter`, 0, 160);
+    const inset = optionalNumberInRange(panel.inset, `${field}.panel.inset`, 0, 0, 0.2);
+    result.panel = {
+      gutter,
+      inset,
+      color: panel.color === undefined ? '#0a0a12' : color(panel.color, `${field}.panel.color`),
+    };
+  }
+  if (comic.impacts !== undefined) {
+    const raw = array(comic.impacts, `${field}.impacts`);
+    if (raw.length > 8) fail(`${field}.impacts may contain at most 8 entries`);
+    const impacts: ComicImpactFrame[] = [];
+    let previous = -1;
+    for (const [index, entry] of raw.entries()) {
+      const impactField = `${field}.impacts[${index}]`;
+      const impact = record(entry, impactField);
+      assertKeys(impact, ['frame', 'intensity', 'color'], impactField);
+      const frame = integer(impact.frame, `${impactField}.frame`, 0);
+      if (frame >= shotLength) {
+        fail(`${impactField}.frame must be inside the shot-local duration ${shotLength}`);
+      }
+      if (frame <= previous) fail(`${field}.impacts must have strictly increasing frames`);
+      previous = frame;
+      impacts.push({
+        frame,
+        intensity: numberInRange(impact.intensity, `${impactField}.intensity`, 0.05, 1),
+        ...(impact.color === undefined
+          ? {}
+          : {color: color(impact.color, `${impactField}.color`)}),
+      });
+    }
+    result.impacts = impacts;
+  }
+  if (comic.wipes !== undefined) {
+    const raw = array(comic.wipes, `${field}.wipes`);
+    if (raw.length > 8) fail(`${field}.wipes may contain at most 8 entries`);
+    const wipes: ComicPanelWipe[] = [];
+    let previous = -1;
+    for (const [index, entry] of raw.entries()) {
+      const wipeField = `${field}.wipes[${index}]`;
+      const wipe = record(entry, wipeField);
+      assertKeys(wipe, ['frame', 'direction', 'color', 'holdFrames'], wipeField);
+      const frame = integer(wipe.frame, `${wipeField}.frame`, 0);
+      if (frame >= shotLength) {
+        fail(`${wipeField}.frame must be inside the shot-local duration ${shotLength}`);
+      }
+      if (frame <= previous) fail(`${field}.wipes must have strictly increasing frames`);
+      previous = frame;
+      wipes.push({
+        frame,
+        direction: oneOf(
+          wipe.direction,
+          ['left', 'right', 'up', 'down'] as const,
+          `${wipeField}.direction`,
+        ),
+        holdFrames: optionalNumberInRange(wipe.holdFrames, `${wipeField}.holdFrames`, 2, 1, 12),
+        ...(wipe.color === undefined ? {} : {color: color(wipe.color, `${wipeField}.color`)}),
+      });
+    }
+    result.wipes = wipes;
+  }
+  return result;
+};
+
+const validateParallaxMedia = (
+  value: unknown,
+  field: string,
+  assetById: ReadonlyMap<string, ProjectAsset>,
+  shotLength: number,
+  fps: number,
+): ShotParallaxMedia => {
+  const media = record(value, field);
+  assertKeys(
+    media,
+    ['kind', 'background', 'layers', 'camera', 'atmosphere', 'light', 'grade', 'comic'],
+    field,
+  );
+  const background = validateParallaxBackground(
+    media.background,
+    `${field}.background`,
+    assetById,
+    fps,
+  );
+  const rawLayers = array(media.layers, `${field}.layers`);
+  if (rawLayers.length === 0) fail(`${field}.layers must contain at least one layer`);
+  if (rawLayers.length > 16) fail(`${field}.layers must contain at most 16 layers`);
+  const layers = rawLayers.map((layer, index) =>
+    validateParallaxLayer(layer, `${field}.layers[${index}]`, assetById, shotLength),
+  );
+  const orders = new Set<number>();
+  for (const layer of layers) {
+    if (orders.has(layer.order)) fail(`${field}.layers contains duplicate order ${layer.order}`);
+    orders.add(layer.order);
+  }
+  for (const role of ['midground', 'foreground'] as const) {
+    if (!layers.some((layer) => layer.role === role)) {
+      fail(`${field}.layers requires at least one ${role} layer for a valid two-and-a-half-D shot`);
+    }
+  }
+  let previousRank = -1;
+  for (const layer of [...layers].sort((left, right) => left.order - right.order)) {
+    const rank = ROLE_ORDER[layer.role];
+    if (rank < previousRank) {
+      fail(
+        `${field}.layers draw order is wrong: ${layer.role} appears after a nearer depth tier; background, midground, subject, foreground must increase with order`,
+      );
+    }
+    previousRank = rank;
+  }
+  const depths = [background.parallax, ...layers.map((layer) => layer.parallax)];
+  if (Math.max(...depths) - Math.min(...depths) < 0.25) {
+    fail(
+      `${field} depth span must be at least 0.25 between the nearest and farthest layer so parallax is measurable`,
+    );
+  }
+  const camera = validateCameraMove(media.camera, `${field}.camera`);
+  const atmosphere = validateAtmosphere(media.atmosphere, `${field}.atmosphere`);
+  const light = validateLightVariation(media.light, `${field}.light`);
+  const grade = validateGrade(media.grade, `${field}.grade`);
+  const comic =
+    media.comic === undefined
+      ? undefined
+      : validateComicTreatment(media.comic, `${field}.comic`, shotLength, fps);
+  return {
+    kind: 'parallax-2p5d',
+    background,
+    layers,
+    camera,
+    atmosphere,
+    light,
+    ...(grade === undefined ? {} : {grade}),
+    ...(comic === undefined ? {} : {comic}),
+  };
+};
+
+export const mediaRendererNeedsCapability = (
+  media: ShotMediaConfig,
+): ReadonlyArray<'image-plate' | 'video-plate' | 'comic-treatment'> => {
+  if (media.kind === 'parallax-2p5d') {
+    const needs: Array<'image-plate' | 'video-plate' | 'comic-treatment'> = [
+      media.background.kind === 'video' ? 'video-plate' : 'image-plate',
+    ];
+    if (media.comic !== undefined) needs.push('comic-treatment');
+    return needs;
+  }
+  return ['video-plate'];
+};
+
+const assertMediaRendererStyle = (
+  renderer: MediaRendererKind,
+  media: ShotMediaConfig | undefined,
+  profile: VisualStyleProfile | undefined,
+  label: string,
+): void => {
+  if (!profile) return;
+  const route = getStyleMediaRoute(profile, renderer);
+  if (!route) {
+    fail(
+      `${label} uses renderer ${renderer}, which style ${profile.id} does not declare; declared media routes: ${profile.mediaRoutes.map((entry) => entry.renderer).join(', ') || 'none'}`,
+    );
+  }
+  if (!media) {
+    fail(
+      `${label} uses renderer ${renderer} without shot media; media renderers require an explicit media declaration`,
+    );
+  }
+  for (const capability of mediaRendererNeedsCapability(media)) {
+    if (!styleMediaRouteSupports(route, capability)) {
+      fail(
+        `${label} style ${profile.id} media route ${renderer} does not support ${capability}; declared: ${route.capabilities.join(', ') || 'none'}`,
+      );
+    }
+  }
+};
+
 const validateMedia = (
   value: unknown,
   field: string,
@@ -370,7 +920,7 @@ const validateMedia = (
   fps: number,
 ): ShotMediaConfig => {
   const media = record(value, field);
-  const kind = oneOf(media.kind, ['video', 'hybrid'] as const, `${field}.kind`);
+  const kind = oneOf(media.kind, ['video', 'hybrid', 'parallax-2p5d'] as const, `${field}.kind`);
   if (kind !== renderer) {
     fail(`${field}.kind must match renderer "${renderer}", received "${kind}"`);
   }
@@ -379,6 +929,9 @@ const validateMedia = (
       kind: 'video',
       ...validateVideoSource(media, field, assetById, fps, ['kind']),
     } satisfies ShotVideoMedia;
+  }
+  if (kind === 'parallax-2p5d') {
+    return validateParallaxMedia(value, field, assetById, shotLength, fps);
   }
   assertKeys(media, ['kind', 'video', 'layers', 'overlay'], field);
   const video = validateVideoSource(media.video, `${field}.video`, assetById, fps);
@@ -815,25 +1368,49 @@ export const validateProjectConfig = (
   }
   if (style !== undefined) {
     const styleId = style.id;
+    const profile = getStyleProfile(styleId);
     const modulesById = new Map(sceneModules.map((module) => [module.id, module]));
-    const assertShotStyle = (renderer: string, label: string): void => {
-      if (!renderer.startsWith(PROJECT_SCENE_RENDERER_PREFIX)) {
-        fail(
-          `${label} uses renderer ${renderer}, which does not declare visual style ${styleId}; style-driven projects require a project scene module with styleIds`,
-        );
+    const assertRendererStyle = (
+      renderer: string,
+      shotMedia: ShotMediaConfig | undefined,
+      label: string,
+      requireMedia: boolean,
+    ): void => {
+      if (renderer.startsWith(PROJECT_SCENE_RENDERER_PREFIX)) {
+        const moduleId = renderer.slice(PROJECT_SCENE_RENDERER_PREFIX.length);
+        const module = modulesById.get(moduleId);
+        if (!module) fail(`${label} references undeclared scene module ${moduleId}`);
+        if (!module.styleIds || !module.styleIds.includes(styleId)) {
+          fail(
+            `${label} uses scene module ${moduleId}, which does not declare visual style ${styleId}; declared: ${(module.styleIds ?? []).join(', ') || 'none'}`,
+          );
+        }
+        return;
       }
-      const moduleId = renderer.slice(PROJECT_SCENE_RENDERER_PREFIX.length);
-      const module = modulesById.get(moduleId);
-      if (!module) fail(`${label} references undeclared scene module ${moduleId}`);
-      if (!module.styleIds || !module.styleIds.includes(styleId)) {
-        fail(
-          `${label} uses scene module ${moduleId}, which does not declare visual style ${styleId}; declared: ${(module.styleIds ?? []).join(', ') || 'none'}`,
+      if (MEDIA_RENDERERS.has(renderer)) {
+        if (!requireMedia && !shotMedia) {
+          if (!profile || !getStyleMediaRoute(profile, renderer as MediaRendererKind)) {
+            fail(
+              `${label} uses renderer ${renderer}, which style ${styleId} does not declare; declared media routes: ${(profile?.mediaRoutes ?? []).map((entry) => entry.renderer).join(', ') || 'none'}`,
+            );
+          }
+          return;
+        }
+        assertMediaRendererStyle(
+          renderer as MediaRendererKind,
+          shotMedia,
+          profile,
+          label,
         );
+        return;
       }
+      fail(
+        `${label} uses renderer ${renderer}, which does not declare visual style ${styleId}; style-driven projects require a project scene module with styleIds or a style-declared media renderer`,
+      );
     };
-    assertShotStyle(defaultRenderer, 'visual.defaultRenderer');
+    assertRendererStyle(defaultRenderer, undefined, 'visual.defaultRenderer', false);
     for (const [index, shot] of allShots.entries()) {
-      assertShotStyle(shot.renderer, `shots[${index}]`);
+      assertRendererStyle(shot.renderer, shot.media, `shots[${index}]`, true);
     }
   }
   for (const [index, shot] of allShots.entries()) {

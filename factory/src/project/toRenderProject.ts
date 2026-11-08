@@ -10,6 +10,33 @@ import {resolveShots} from '../timeline/resolver';
 const cloneMedia = (media: ShotMediaConfig | undefined): ShotMediaConfig | undefined => {
   if (!media) return undefined;
   if (media.kind === 'video') return {...media};
+  if (media.kind === 'parallax-2p5d') {
+    return {
+      kind: 'parallax-2p5d',
+      background: {...media.background},
+      layers: media.layers.map((layer) =>
+        layer.motion
+          ? {...layer, motion: {...layer.motion}}
+          : {...layer},
+      ),
+      camera: {...media.camera},
+      atmosphere: {...media.atmosphere},
+      light: media.light.sweep
+        ? {...media.light, sweep: {...media.light.sweep}}
+        : {...media.light},
+      ...(media.grade ? {grade: {...media.grade}} : {}),
+      ...(media.comic
+        ? {
+            comic: {
+              ...media.comic,
+              ...(media.comic.panel ? {panel: {...media.comic.panel}} : {}),
+              impacts: (media.comic.impacts ?? []).map((impact) => ({...impact})),
+              wipes: (media.comic.wipes ?? []).map((wipe) => ({...wipe})),
+            },
+          }
+        : {}),
+    };
+  }
   return {
     kind: 'hybrid',
     video: {...media.video},

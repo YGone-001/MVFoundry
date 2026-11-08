@@ -59,21 +59,22 @@ Requirements:
 The visual style catalog is separate from renderers and assets. See [visual styles](visual-styles.md).
 
 - `visual.style.id` is optional. Projects without it keep the legacy `styleProfile` path unchanged.
-- A style-driven project must use project Canvas modules whose `sceneModules[].styleIds` declares the selected style.
+- A style-driven shot renderer is either a project Canvas module whose `sceneModules[].styleIds` declares the selected style, or a media renderer listed in that style's `mediaRoutes`.
 - The module export declares the same `supportedStyles`; mismatches fail closed at bundle bind.
 - The module render context receives a frozen `style` object (id, label, optional theme roles and the full profile), or `null` for legacy modules.
 - `canvas.mode: output` gives a full-resolution Canvas 2D surface; `project-pixel` keeps integer pixels and hold-based sampling.
 - `svg`, `html` and `three` are declared `BLOCKED_CAPABILITY`; they are not selectable renderers.
-- `footage-hybrid` is the existing approved-video/layer route, not a style. A style-driven project currently requires Canvas modules for every shot.
+- `footage-hybrid` remains the approved video/layer route. `video` and `hybrid` are style-bound only when the selected style declares them; `retro-pixel` declares no media route.
 
 ```bash
 npm run style -- list
 npm run style -- inspect --id cinematic-illustration-2p5d
 npm run style -- check --project synthetic-module-pixel-demo --workspace <external-workspace>
 npm run style:verify
+npm run style:media:verify
 ```
 
-`style:verify` renders real stills in a disposable synthetic workspace, compares decoded pixels (not just metadata), checks deterministic repeat output and verifies that an unknown style is refused without writing an output file.
+`style:verify` renders real stills in a disposable synthetic workspace, compares decoded pixels (not just metadata), checks deterministic repeat output and verifies that an unknown style is refused without writing an output file. `style:media:verify` adds the mixed Canvas/Video/Hybrid/2.5D timeline with decoded per-depth displacement evidence.
 
 ## Output override policy
 
@@ -127,14 +128,31 @@ Frame 100 of a shot that starts at frame 100 displays its declared source in-poi
 
 The overlay Canvas is independent of video readiness; Remotion handles image/video loading. A missing layer asset, unstaged source or invalid timing throws an actionable error rather than rendering a silent fallback.
 
+### Asset-backed 2.5D (`parallax-2p5d`)
+
+`ParallaxScene` composes:
+
+1. one approved background plate (`image` or `video`), with the same shot-local mapping and muted audio when it is footage;
+2. approved RGBA layers sorted by `order`, each on an explicit depth role (`midground`, `subject`, `foreground`);
+3. a deterministic Canvas overlay with mist, rain, light sweep, static grain, tint, vignette and optional comic treatment.
+
+Layer placement is `translate(position + cameraOffset × parallax × frameSize) scale(depthZoom × scale × overscan)`. Camera and layer motion are sampled from the shot-local output frame, never from wall time. Since the camera offset is multiplied by each layer's `parallax`, foreground, subject and background displace by different amounts by construction, which is measured from decoded frames in `style:media:verify`.
+
+Camera motion is one of `pan`, `push-in`, `pull-back` or `hold`, and the declared kind must agree with the numeric path (constant zoom for a pan, increasing zoom for a push-in, decreasing for a pull-back, no movement for a hold). `blur` is an authored depth-of-field value in output pixels. Comic treatment adds stepped motion, halftone, speed lines, panel gutters, impact frames and panel wipes; it is rejected unless the selected style declares `comic-treatment`.
+
+The renderer throws on an unstaged plate or layer, on missing footage probe metadata, and on a source that is too short for the shot. It never falls back to another renderer.
+
 ### Media verification
 
 ```bash
 npm run media:seed
 npm run media:verify
+npm run style:media:verify
 ```
 
 `media:seed` generates synthetic 30fps/24fps H.264 MP4s with embedded 950 Hz audio, transparent RGBA PNG layers, WAV soundtracks and hash-approved manifests inside the external workspace. `media:verify` renders representative stills and complete videos for both media projects, samples decoded source colors at cut/in-point frames, checks PNG alpha and layer compositing, verifies H.264 dimensions/fps/frame counts, confirms one audio stream from the project mix, and checks embedded source audio is muted with FFmpeg band analysis. Reports are written externally to `reports/media-render-evidence.json`.
+
+`style:media:verify` is the bounded style-aware regression: one project mixes a styled Canvas shot, a Video shot, a Hybrid shot and a 2.5D shot; the script measures decoded depth-stripe displacement, decodes a short MP4 for codec/size/fps/frames/pixel format/audio counts, and proves four negative controls write no output.
 
 ## Audio rendering
 

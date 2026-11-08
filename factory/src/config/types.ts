@@ -166,7 +166,150 @@ export type ShotHybridMedia = {
   overlay: HybridOverlayConfig;
 };
 
-export type ShotMediaConfig = ShotVideoMedia | ShotHybridMedia;
+export type ParallaxLayerRole = 'midground' | 'subject' | 'foreground';
+
+export type LayerMotionConfig = {
+  translateXFrom: number;
+  translateXTo: number;
+  translateYFrom: number;
+  translateYTo: number;
+  fromFrame?: number;
+  toFrame?: number;
+  easing: 'linear' | 'easeInOut';
+};
+
+/**
+ * A depth layer. `parallax` is the fraction of the camera displacement this
+ * layer follows; the compositor multiplies the camera offset by it, so two
+ * layers with different values always move by different amounts.
+ */
+export type ParallaxLayerConfig = {
+  assetId: string;
+  role: ParallaxLayerRole;
+  order: number;
+  parallax: number;
+  opacity: number;
+  fit: MediaFit;
+  positionX: number;
+  positionY: number;
+  scale: number;
+  /** Optional depth-of-field blur in output pixels; 0 keeps the plate sharp. */
+  blur?: number;
+  visibleFromFrame: number;
+  visibleToFrame: number;
+  motion?: LayerMotionConfig;
+};
+
+export type ParallaxImageBackground = {
+  kind: 'image';
+  assetId: string;
+  opacity: number;
+  fit: MediaFit;
+  positionX: number;
+  positionY: number;
+  scale: number;
+  parallax: number;
+  blur?: number;
+};
+
+export type ParallaxVideoBackground = VideoSourceConfig & {
+  kind: 'video';
+  opacity: number;
+  parallax: number;
+  blur?: number;
+};
+
+export type ParallaxBackgroundConfig = ParallaxImageBackground | ParallaxVideoBackground;
+
+export type CameraMoveKind = 'pan' | 'push-in' | 'pull-back' | 'hold';
+
+/**
+ * Normalized camera path. x/y are fractions of the output frame and zoom is a
+ * multiplier starting at 1. The renderer samples this once per output frame.
+ */
+export type CameraMoveConfig = {
+  kind: CameraMoveKind;
+  fromX: number;
+  fromY: number;
+  fromZoom: number;
+  toX: number;
+  toY: number;
+  toZoom: number;
+  easing: 'linear' | 'easeInOut';
+};
+
+export type AtmosphereKind = 'rain' | 'mist' | 'rain-mist' | 'none';
+
+export type AtmosphereConfig = {
+  kind: AtmosphereKind;
+  intensity: number;
+  windX: number;
+};
+
+export type LightSweepConfig = {
+  intensity: number;
+  fromX: number;
+  toX: number;
+  width: number;
+  color?: string;
+};
+
+export type LightVariationConfig = {
+  amplitude: number;
+  frequency: number;
+  phase: number;
+  sweep?: LightSweepConfig;
+};
+
+export type GradeConfig = {
+  saturation: number;
+  contrast: number;
+  brightness: number;
+  tint: string;
+  tintOpacity: number;
+  vignette: number;
+  grain: number;
+};
+
+export type ComicImpactFrame = {
+  frame: number;
+  intensity: number;
+  color?: string;
+};
+
+export type ComicPanelWipe = {
+  frame: number;
+  direction: 'left' | 'right' | 'up' | 'down';
+  color?: string;
+  holdFrames: number;
+};
+
+export type ComicTreatmentConfig = {
+  motionStepFps: number;
+  halftone: number;
+  speedLines: number;
+  panel: {gutter: number; color: string; inset: number} | null;
+  impacts: ComicImpactFrame[];
+  wipes: ComicPanelWipe[];
+};
+
+/**
+ * Asset-backed 2.5D shot. The background is one opaque plate; every other
+ * depth tier is an RGBA layer, so an opaque image can never masquerade as a
+ * transparent cutout.
+ */
+export type ShotParallaxMedia = {
+  kind: 'parallax-2p5d';
+  background: ParallaxBackgroundConfig;
+  layers: ParallaxLayerConfig[];
+  camera: CameraMoveConfig;
+  atmosphere: AtmosphereConfig;
+  light: LightVariationConfig;
+  grade?: Partial<GradeConfig>;
+  comic?: Partial<ComicTreatmentConfig>;
+};
+
+export type ShotMediaConfig = ShotVideoMedia | ShotHybridMedia | ShotParallaxMedia;
 
 export type VideoAssetMetadata = {
   assetId: string;
@@ -339,6 +482,14 @@ export type LoadedAsset = ProjectAsset & {
   hashVerified: boolean;
   videoMetadata?: VideoAssetMetadata;
   audioMetadata?: AudioAssetMetadata;
+  /** Present only when a project uses the asset-backed 2.5D route. */
+  imageMetadata?: {
+    width: number;
+    height: number;
+    bitDepth: number;
+    colorType: number;
+    hasAlpha: boolean;
+  };
 };
 
 export type LoadedSceneModule = SceneModuleConfig & {

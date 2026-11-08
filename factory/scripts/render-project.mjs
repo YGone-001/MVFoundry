@@ -45,6 +45,7 @@ const {loadProject} = require('../dist/src/project/loadProject.js');
 const {stageProjectMedia} = require('../dist/src/media/stagePublic.js');
 const {buildProjectAudioMix, sliceNormalizedMix} = require('../dist/src/audio/mixer.js');
 const {frameToSampleIndex} = require('../dist/src/timeline/audioClock.js');
+const {renderEvidenceFingerprint} = require('../dist/src/quality/evidence.js');
 // Bundling runs locally through @remotion/bundler inside bundleProject; no remote service is used.
 const {bundleProject} = require('../dist/src/remotion/bundleProject.js');
 const {
@@ -341,6 +342,7 @@ try {
     mode,
     frameRange: mode === 'still' ? [stillFrame, stillFrame] : frameRange,
     output,
+    fingerprint: renderEvidenceFingerprint(project.config, project.durationInFrames),
     bytes: statSync(output).size,
     frames: reportFrames,
     encoder: mode === 'video' ? 'system-ffmpeg' : 'remotion-render-still',

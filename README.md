@@ -71,8 +71,9 @@ It does not include any song, recording, lyrics, reference image, production sce
   - `layered-canvas` — full-resolution Canvas 2D with an optional approved image background.
   - `video` — approved local H.264 MP4 playback with shot-local source in-point, fit/scale and muted source audio.
   - `hybrid` — video background, transparent PNG layers and deterministic Canvas overlay in explicit layer order.
+  - `parallax-2p5d` — asset-backed layered 2.5D: one approved plate, depth-ordered RGBA cutouts, deterministic camera/parallax, atmosphere, authored depth of field and optional comic treatment.
   - `project:<id>` — trusted, hash-verified Canvas 2D scene modules declared by the external project.
-- Visual styles: six registered Canvas 2D profiles (`cinematic-illustration-2p5d`, `anime-motion-comic`, `ink-watercolor`, `editorial-motion-graphics`, `stylized-3d-diorama`, `retro-pixel`), optional themes, project/module style capability binding, and a real-pixel `style:verify` regression. `svg`, `html` and `three` remain blocked capabilities; `footage-hybrid` is an approved-media production route, not a style. See [visual styles](docs/visual-styles.md).
+- Visual styles: six registered Canvas 2D profiles (`cinematic-illustration-2p5d`, `anime-motion-comic`, `ink-watercolor`, `editorial-motion-graphics`, `stylized-3d-diorama`, `retro-pixel`), optional themes, project/module style capability binding, declared per-style media routes, and real-pixel `style:verify` plus decoded-output `style:media:verify` regressions. `svg`, `html` and `three` remain blocked capabilities; `footage-hybrid` is an approved-media production route, not a style. See [visual styles](docs/visual-styles.md).
 - Approved-asset staging into the external project cache and Remotion `publicDir`.
 - Local FFprobe validation of approved video metadata and PNG layer alpha metadata before rendering.
 - Per-project staged Remotion entries and local bundles that never copy project scene source into this repository.
@@ -143,11 +144,15 @@ npm run audio:seed
 npm run audio:verify
 npm run preproduction:seed
 npm run preproduction:verify
+npm run style:verify
+npm run style:media:verify
 ```
 
 On PowerShell: `$env:MV_WORKSPACE_ROOT = 'C:\absolute\path\outside\this\repository'`.
 
 `seed:examples` creates the declarative/module projects. `media:seed` generates the Video/Hybrid projects, including synthetic H.264 source videos with embedded audio, a transparent PNG layer and synthetic soundtracks. `audio:seed` generates synthetic MP3/FLAC/M4A/WAV sources, a referenced PCM master and a 44.1 kHz click track. All generated media remains in the external workspace and is not committed.
+
+`style:media:verify` builds its own disposable synthetic workspace. To reproduce the local cinematic and anime prototypes instead, run `style:art`, `style:prototype:seed`, `render:project --mode video` and `style:review` against an external workspace; see [visual styles](docs/visual-styles.md).
 
 ## 8. Configuring MV_WORKSPACE_ROOT
 
@@ -213,8 +218,9 @@ Set `REMOTION_BROWSER_EXECUTABLE` or `CHROME_PATH` if Remotion cannot locate a b
 | `project:<id>` | implemented for trusted Canvas 2D scene modules |
 | `video` | implemented for approved local H.264 MP4 sources |
 | `hybrid` | implemented for video + transparent PNG + Canvas overlay |
+| `parallax-2p5d` | implemented for plate + depth-ordered RGBA layers with deterministic camera |
 
-Visual styles are orthogonal to these renderers. A registered style is a visual language implemented by a project Canvas module; it is not another renderer. `svg`, `html` and `three` are not implemented adapters and are reported as `BLOCKED_CAPABILITY`. See [visual styles](docs/visual-styles.md).
+Visual styles are orthogonal to these renderers. A registered style is a visual language implemented by a project Canvas module, or by a media renderer the style explicitly declares (`mediaRoutes`). It is not another renderer. `svg`, `html` and `three` are not implemented adapters and are reported as `BLOCKED_CAPABILITY`. See [visual styles](docs/visual-styles.md).
 
 Project-local TypeScript/TSX modules are supported through an explicit manifest and a per-project staged Remotion entry. Modules are executable local code and are trusted only after explicit user approval and hash verification. See §13.
 

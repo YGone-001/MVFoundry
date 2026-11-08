@@ -37,6 +37,7 @@ const list = () => {
             label: profile.label,
             implementedBackends: profile.implementedBackends,
             compatibleBackends: profile.compatibleBackends,
+            mediaRoutes: profile.mediaRoutes,
             assetTypes: profile.assetTypes,
             limitations: profile.limitations,
           };

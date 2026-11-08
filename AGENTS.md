@@ -288,11 +288,18 @@ Do not treat plans, prior reports or user summaries as proof of the current file
 
 - Visual style, rendering backend and asset production are separate concepts. A style is a visual language, not a renderer and not a palette. All six registered P1-G-A styles currently execute on Canvas 2D and must produce structurally different images.
 - `factory/src/style/catalog.ts` is the style registry; `factory/src/style/themes.ts` owns optional role themes. `visual.style` is optional and legacy projects keep `visual.styleProfile` unchanged. There is no breaking schema migration.
-- A style-driven project must use project Canvas modules for every shot. `sceneModules[].styleIds` declares the project capability and the module export must declare matching `supportedStyles`; a mismatch fails closed at bundle bind.
+- A style-driven project may mix project Canvas modules with style-declared media renderers. `sceneModules[].styleIds` declares the project capability and the module export must declare matching `supportedStyles`; a mismatch fails closed at bundle bind. A media renderer is allowed only when the selected style declares that route in `mediaRoutes`; the catalog never assumes approved footage is compatible with every style.
 - The module render context receives a frozen `style` object with the active id, label, optional theme roles and the full profile. Legacy modules receive `null`; the engine never invents a default style.
 - `canvas.mode: output` is full-resolution Canvas 2D; `project-pixel` keeps integer pixels and hold-based sampling. Changing `visual.style.id` must change actual output, not only metadata.
 - `svg`, `html` and `three` are `BLOCKED_CAPABILITY` in this phase: no reviewed SVG/HTML contract or sanitizer and no WebGL determinism/headless policy. A compatible-backend label never implies an implemented backend, and a blocked backend must not be selectable.
-- `footage-hybrid` is the existing approved video/layer production route, not a style. Binding a selected style to Video/Hybrid shots is not implemented; a style-driven project currently refuses built-in renderers. Do not fake that capability.
+- `footage-hybrid` remains the approved video/layer production route. `video` and `hybrid` are now style-bound when the style declares them; `retro-pixel` declares no media route at all, so it refuses footage instead of silently grading it.
+- `parallax-2p5d` is the asset-backed 2.5D compositor. It composes one approved opaque plate (`image` or `video`) with RGBA `layer` cutouts on explicit depth roles, a deterministic normalized camera path, atmosphere, light variation, style-derived grade and optional comic treatment. It extends the existing renderer registry and the existing asset kinds; it does not add a second asset system and does not replace Canvas modules.
+- Depth is a contract, not a claim: validation requires an opaque background plate, at least one midground and one foreground layer, role-ordered draw order, per-role parallax ranges, a depth span of at least 0.25, bounded camera amplitude and bounded layer translation. The renderer multiplies camera displacement by each layer's `parallax`, so layers always move by different amounts under the same camera move.
+- Background plates are PNG-probed only on projects that use the 2.5D route. Layer assets must be alpha-capable PNGs and can never stand in for an opaque plate. Every source stays declared in the project manifest, hash-verified, staged through the write boundary, and rejected on traversal, links or escapes.
+- The integer output-frame clock remains the only timeline authority; the project audio mix remains the only audio authority. Camera, layer motion and light variation are sampled from the shot-local frame, and comic motion quantisation uses integer arithmetic, so the same frame always produces the same image.
+- Unknown styles, unsupported style/backend combinations, missing media, wrong asset kinds, unapproved assets, stale hashes, unaligned source in-points, wrong depth order and missing depth tiers fail closed before any output file is written.
+- `npm run style:media:verify` is the bounded CI regression. It renders a styled Canvas shot, a Video shot, a Hybrid shot and a 2.5D shot in one synthetic project, measures decoded per-depth stripe displacement, decodes a short MP4 for codec, size, fps, frame count, pixel format and audio-stream count, and proves four negative controls write nothing.
+- `npm run style:art`, `npm run style:prototype:seed` and `npm run style:review` reproduce the local artistic prototypes and the human review package. The prototypes prove that the compositor works and that two visual languages read differently; they do not establish artistic approval. The verdict stays `PENDING_HUMAN_REVIEW` until the creator reviews the actual clips.
 - `npm run style:verify` creates a disposable synthetic project, renders two styles through the same module, compares decoded raw pixels, checks deterministic repeats and verifies unknown-style refusal with no output file. A full gallery or a valid still does not establish human artistic approval.
 - The six-style gallery, boards, frames, videos and quality records stay in the external workspace. Missing fidelity must be disclosed (`BLOCKED_CAPABILITY` or an asset limitation), never replaced by a style label.
 
@@ -379,6 +386,11 @@ npm run style -- list
 npm run style -- inspect --id cinematic-illustration-2p5d
 npm run style -- check --project synthetic-module-pixel-demo --workspace <external-workspace>
 npm run style:verify
+npm run style:media:verify
+npm run style:art -- --workspace <external-workspace> --project <style-project> --set cinematic|anime
+npm run style:prototype:seed -- --workspace <external-workspace> --project <style-project> --set cinematic|anime
+npm run render:project -- --project <style-project> --mode video --frames 0-359
+npm run style:review -- --workspace <external-workspace>
 npm run verify:modules
 npm run audit:git
 npm run audit:publication

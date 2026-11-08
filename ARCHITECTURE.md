@@ -195,6 +195,7 @@ Preproduction is a local planning layer, not semantic music understanding and no
 | `project:<id>` | implemented | trusted project-local Canvas 2D module bound per bundle |
 | `video` | implemented | approved local H.264 MP4; shot-local source in-point; muted source audio |
 | `hybrid` | implemented | video + ordered transparent PNG layers + deterministic Canvas overlay |
+| `parallax-2p5d` | implemented | one approved plate + depth-ordered RGBA layers, deterministic camera, atmosphere, grade and optional comic treatment |
 
 Renderers are a discriminated union: Canvas renderers keep the existing `canvasSize`, `samplingFps` and `render(ctx, ...)` contract; media renderers expose a React `Component` rendered inside the composition. Existing custom Canvas renderers remain valid. Adding a renderer does not change the frame clock. Unknown renderers fail at project load.
 
@@ -211,12 +212,24 @@ The generated entry calls `bindProjectSceneModules`, which validates the exporte
 `factory/src/style/catalog.ts` is a registry of visual languages, not renderers. Each profile declares composition, materials, lighting, motion, camera, typography, required asset types, compatible backends, implemented backends, output capabilities, limitations and quality expectations. `factory/src/style/themes.ts` owns optional role palettes; a theme cannot change a style's identity.
 
 - `visual.style` is optional. Legacy projects keep `visual.styleProfile` and are not reinterpreted.
-- A style-driven project requires project Canvas modules for every shot. `sceneModules[].styleIds` declares project capability, the module export declares `supportedStyles`, and the two must agree or the bundle bind fails.
+- A style-driven project may mix project Canvas modules with style-declared media renderers. `sceneModules[].styleIds` declares project capability, the module export declares `supportedStyles`, and the two must agree or the bundle bind fails. A media renderer additionally requires the selected style to declare that route in `mediaRoutes`.
 - The module render context receives a frozen `style` object, including optional theme roles and the full profile. Legacy modules receive `null`.
 - `canvas.mode: output` provides full-resolution Canvas 2D; `project-pixel` keeps integer pixels and hold-based sampling.
 - All six registered styles are implemented on Canvas 2D. `svg`, `html` and `three` are declared `BLOCKED_CAPABILITY` with concrete contract/security/determinism gaps; entering a style does not make those backends available.
-- `footage-hybrid` is documented as the existing approved video/layer production route, not a visual style. Binding a selected style to Video/Hybrid shots is not implemented in this prototype, and a style-driven project currently refuses built-in renderers.
-- `npm run style:verify` renders two styles through the same module in a disposable synthetic workspace and compares decoded raw pixels, deterministic repeats and unknown-style refusal. It is bounded CI evidence, not a full artistic demonstration.
+- `footage-hybrid` remains the approved video/layer route. `video` and `hybrid` are style-bound only for styles that declare them; `retro-pixel` declares no media route and therefore refuses footage.
+- `npm run style:verify` renders two styles through the same module in a disposable synthetic workspace and compares decoded raw pixels, deterministic repeats and unknown-style refusal. `npm run style:media:verify` additionally proves mixed Canvas/Video/Hybrid/2.5D timelines and measures decoded per-depth displacement. Both are bounded CI evidence, not a full artistic demonstration.
+
+### Asset-backed 2.5D composition
+
+`factory/src/scenes/renderers/parallax2p5d.tsx` and `factory/src/scenes/parallaxMath.ts` implement the 2.5D route.
+
+- A shot declares one background (`image` or `video`), an ordered list of RGBA `layer` cutouts and a normalized camera path. The plate owns the opaque frame; layers own the depth tiers. An opaque image cannot be declared as a transparent layer and a transparent layer cannot replace the plate.
+- Validation requires a midground and a foreground layer, role-ordered draw order, per-role parallax ranges, a depth span of at least 0.25, camera amplitude within ±0.25 of frame size and layer translation within ±0.7 of frame width. Unknown keys, unsafe colours, wrong asset kinds and missing tiers fail closed.
+- `resolveLayerDepthTransform` multiplies the sampled camera offset by each layer's `parallax` and by a depth-weighted zoom factor. Two layers with different depth values therefore always displace by different amounts; the pure function is unit-tested and also measured from decoded frames in CI.
+- Atmosphere (rain, mist or both), light amplitude, a travelling light sweep, static grain, vignette, style-declared grading and optional comic treatment are deterministic functions of the shot-local output frame. Comic motion is quantised with integer arithmetic for holds.
+- Optional `blur` per plate or layer provides authored depth of field in output pixels. Overscan protects only opaque plates from edge exposure; transparent cutouts keep their own margin.
+- Background plates are PNG-probed (`probeImagePng`) only for projects that use this route; layers already require an alpha-capable PNG. Sources remain manifest-declared, hash-verified, staged through the write boundary and rejected on traversal, links or escapes.
+- The integer frame clock and the project audio mix remain the only timeline and audio authorities. The compositor never retimes media and never introduces audio.
 
 ### Trust boundary
 
@@ -243,6 +256,9 @@ The generated entry calls `bindProjectSceneModules`, which validates the exporte
 ## 12. Known boundaries
 
 The operator layer (`factory/scripts/mv-workflow.mjs` and `support/workflow-*.mjs`) composes the existing preproduction validators/compiler, normal loader and range renderer. Draft changes use existing revision paths; content-bound preview/review evidence stays external. Technical promotion and human artistic acceptance are separate. See [operator workflow](docs/operator-workflow.md). Both original full-project verifiers remain mandatory alongside decoded workflow acceptance.
+
+- Preproduction planning and storyboard compilation accept Canvas, video and hybrid media only. `parallax-2p5d` shots are authored directly in `project.json`; storyboard-driven generation of them is not implemented.
+- The 2.5D route is layered cardboard parallax with authored blur, not volumetric 3D. Depth ordering, per-role parallax ranges and a minimum depth span are validated, but occlusion between cutouts is only what the supplied alpha art provides.
 
 - Video/Hybrid support approved local MP4/H.264 constant-frame-rate, zero-rotation sources only. VFR and rotated sources require preprocessing.
 - `endBehavior` is `reject` only; freeze/hold/end-of-file policies are not implemented.

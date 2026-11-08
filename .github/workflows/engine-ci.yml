@@ -77,6 +77,8 @@ jobs:
         run: npm run verify:modules
       - name: Verify style selection changes decoded pixels and fails closed
         run: npm run style:verify
+      - name: Verify style-aware media composition and real parallax depth
+        run: npm run style:media:verify
       - name: Seed synthetic media workspace
         run: npm run media:seed
       - name: Verify Video and Hybrid renderers

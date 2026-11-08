@@ -10,10 +10,52 @@
 export const STYLE_BACKENDS = ['canvas2d', 'svg', 'html', 'three', 'video'] as const;
 export type StyleBackend = (typeof STYLE_BACKENDS)[number];
 
+/**
+ * Media renderer kinds. A style must declare one of these explicitly before a
+ * style-driven project may place that renderer on the timeline; the catalog
+ * never assumes that approved footage is compatible with every style.
+ */
+export const MEDIA_RENDERER_KINDS = ['video', 'hybrid', 'parallax-2p5d'] as const;
+export type MediaRendererKind = (typeof MEDIA_RENDERER_KINDS)[number];
+
+/**
+ * Capabilities inside a media route. They are checked against the actual shot
+ * media so a style cannot silently accept a plate type it was never reviewed
+ * for.
+ */
+export const STYLE_MEDIA_CAPABILITIES = [
+  'image-plate',
+  'video-plate',
+  'comic-treatment',
+] as const;
+export type StyleMediaCapability = (typeof STYLE_MEDIA_CAPABILITIES)[number];
+
+export type StyleMediaRoute = {
+  renderer: MediaRendererKind;
+  detail: string;
+  capabilities: readonly StyleMediaCapability[];
+  limitations: readonly string[];
+};
+
 export type StylePaletteRole = {
   role: string;
   value: string;
   note: string;
+};
+
+/**
+ * Style-declared grading bias for approved media. Kept explicit so image-backed
+ * scenes are never auto-washed by an unnamed default; `tintRole` names a palette
+ * role instead of duplicating a hex value.
+ */
+export type StyleGradeBias = {
+  saturation: number;
+  contrast: number;
+  brightness: number;
+  tintRole: string;
+  tintOpacity: number;
+  vignette: number;
+  grain: number;
 };
 
 export type VisualStyleProfile = {
@@ -31,10 +73,19 @@ export type VisualStyleProfile = {
   assetTypes: readonly string[];
   compatibleBackends: readonly StyleBackend[];
   implementedBackends: readonly StyleBackend[];
+  mediaRoutes: readonly StyleMediaRoute[];
+  gradeBias: StyleGradeBias;
   outputCapabilities: readonly string[];
   limitations: readonly string[];
   qualityExpectations: readonly string[];
 };
+
+const freezeRoute = (route: StyleMediaRoute): StyleMediaRoute =>
+  Object.freeze({
+    ...route,
+    capabilities: Object.freeze([...route.capabilities]),
+    limitations: Object.freeze([...route.limitations]),
+  });
 
 const freezeProfile = (profile: VisualStyleProfile): VisualStyleProfile =>
   Object.freeze({
@@ -49,6 +100,8 @@ const freezeProfile = (profile: VisualStyleProfile): VisualStyleProfile =>
     assetTypes: Object.freeze([...profile.assetTypes]),
     compatibleBackends: Object.freeze([...profile.compatibleBackends]),
     implementedBackends: Object.freeze([...profile.implementedBackends]),
+    mediaRoutes: Object.freeze(profile.mediaRoutes.map(freezeRoute)),
+    gradeBias: Object.freeze({...profile.gradeBias}),
     outputCapabilities: Object.freeze([...profile.outputCapabilities]),
     limitations: Object.freeze([...profile.limitations]),
     qualityExpectations: Object.freeze([...profile.qualityExpectations]),
@@ -110,6 +163,41 @@ export const STYLE_PROFILES: Readonly<Record<string, VisualStyleProfile>> = Obje
     ],
     compatibleBackends: ['canvas2d', 'svg', 'three', 'video'],
     implementedBackends: ['canvas2d'],
+    mediaRoutes: [
+      {
+        renderer: 'parallax-2p5d',
+        detail:
+          'Approved PNG plates and RGBA layers compose into a deterministic layered 2.5D shot with camera, depth, atmosphere and light motion.',
+        capabilities: ['image-plate', 'video-plate'],
+        limitations: [
+          'depth is layered cardboard parallax, not volumetric 3D',
+          'no real depth of field; blur must be painted into the plates',
+        ],
+      },
+      {
+        renderer: 'video',
+        detail:
+          'Approved footage may occupy a shot when the plate already carries the intended cinematography; the style only grades and times it.',
+        capabilities: ['video-plate'],
+        limitations: ['the engine cannot repaint footage into the illustration language'],
+      },
+      {
+        renderer: 'hybrid',
+        detail:
+          'Approved footage plus RGBA layers, with the style owning overlays, grade and typography.',
+        capabilities: ['video-plate'],
+        limitations: ['layers cannot invent geometry the footage does not contain'],
+      },
+    ],
+    gradeBias: {
+      saturation: 1.06,
+      contrast: 1.08,
+      brightness: 1.02,
+      tintRole: 'harbour',
+      tintOpacity: 0.07,
+      vignette: 0.42,
+      grain: 0.06,
+    },
     outputCapabilities: [
       'deterministic 24fps output at 720p or 1080p',
       'true full-resolution Canvas2D (canvas.mode=output)',
@@ -176,6 +264,39 @@ export const STYLE_PROFILES: Readonly<Record<string, VisualStyleProfile>> = Obje
     ],
     compatibleBackends: ['canvas2d', 'svg'],
     implementedBackends: ['canvas2d'],
+    mediaRoutes: [
+      {
+        renderer: 'parallax-2p5d',
+        detail:
+          'Ink plates and cel cutouts compose through the deterministic layer compositor with comic treatment: stepped motion, halftone, speed lines, panel gutters, impact frames and panel wipes.',
+        capabilities: ['image-plate', 'comic-treatment'],
+        limitations: [
+          'the comic treatment is graphic, not real cel animation',
+          'no in-between drawing: expression changes must exist in the supplied plates',
+        ],
+      },
+      {
+        renderer: 'video',
+        detail: 'Approved footage can be graded and held as a comic panel.',
+        capabilities: ['video-plate'],
+        limitations: ['footage cannot gain ink linework from grading alone'],
+      },
+      {
+        renderer: 'hybrid',
+        detail: 'Approved footage plus RGBA comic cutouts.',
+        capabilities: ['video-plate'],
+        limitations: ['graphic panels still come from the supplied layer art'],
+      },
+    ],
+    gradeBias: {
+      saturation: 1.24,
+      contrast: 1.30,
+      brightness: 1.04,
+      tintRole: 'nightSky',
+      tintOpacity: 0.04,
+      vignette: 0.18,
+      grain: 0.02,
+    },
     outputCapabilities: ['deterministic 24fps output', 'full-resolution Canvas2D'],
     limitations: [
       'motion-comic is not full character animation',
@@ -235,6 +356,39 @@ export const STYLE_PROFILES: Readonly<Record<string, VisualStyleProfile>> = Obje
     ],
     compatibleBackends: ['canvas2d', 'svg'],
     implementedBackends: ['canvas2d'],
+    mediaRoutes: [
+      {
+        renderer: 'parallax-2p5d',
+        detail:
+          'Approved ink-wash plates compose with a slow horizontal drift and pigment-like edge treatment; negative space is preserved by keeping plates sparse.',
+        capabilities: ['image-plate'],
+        limitations: [
+          'the compositor cannot simulate pigment diffusion; wash edges must be painted',
+          'no strong camera moves: watercolour reads as a scroll, not a dolly',
+        ],
+      },
+      {
+        renderer: 'video',
+        detail: 'Approved footage can be held in a still, paper-toned frame.',
+        capabilities: ['video-plate'],
+        limitations: ['video texture cannot become a wet wash without authored plates'],
+      },
+      {
+        renderer: 'hybrid',
+        detail: 'Approved footage plus sparse RGBA brush layers.',
+        capabilities: ['video-plate'],
+        limitations: ['pigment behaviour is authored, never synthesised per frame'],
+      },
+    ],
+    gradeBias: {
+      saturation: 0.94,
+      contrast: 0.98,
+      brightness: 1.10,
+      tintRole: 'stain',
+      tintOpacity: 0.10,
+      vignette: 0.12,
+      grain: 0.14,
+    },
     outputCapabilities: ['deterministic 24fps output', 'full-resolution Canvas2D'],
     limitations: [
       'procedural ink cannot equal real watercolour',
@@ -293,6 +447,39 @@ export const STYLE_PROFILES: Readonly<Record<string, VisualStyleProfile>> = Obje
     ],
     compatibleBackends: ['canvas2d', 'html', 'svg'],
     implementedBackends: ['canvas2d'],
+    mediaRoutes: [
+      {
+        renderer: 'parallax-2p5d',
+        detail:
+          'Approved duotone cutouts compose as flat graphic cards with grid-snapped camera moves and hard layout wipes.',
+        capabilities: ['image-plate'],
+        limitations: [
+          'cutouts must already be duotone; the compositor does not author type',
+          'continuous photographic motion fights the editorial grid',
+        ],
+      },
+      {
+        renderer: 'video',
+        detail: 'Approved footage is held as a duotone image block inside the layout.',
+        capabilities: ['video-plate'],
+        limitations: ['the footage is treated as a still block; no kinetic type is generated'],
+      },
+      {
+        renderer: 'hybrid',
+        detail: 'Approved footage plus duotone cutouts and graphic layers.',
+        capabilities: ['video-plate'],
+        limitations: ['the editorial layout must be authored in the layer art'],
+      },
+    ],
+    gradeBias: {
+      saturation: 1.12,
+      contrast: 1.16,
+      brightness: 1.05,
+      tintRole: 'paper',
+      tintOpacity: 0.06,
+      vignette: 0.08,
+      grain: 0.02,
+    },
     outputCapabilities: ['deterministic 24fps output', 'full-resolution Canvas2D'],
     limitations: [
       'character performance is limited; type carries the narrative',
@@ -351,6 +538,33 @@ export const STYLE_PROFILES: Readonly<Record<string, VisualStyleProfile>> = Obje
     ],
     compatibleBackends: ['three', 'canvas2d'],
     implementedBackends: ['canvas2d'],
+    mediaRoutes: [
+      {
+        renderer: 'video',
+        detail:
+          'Approved footage can be presented inside the miniature stage frame when the set was already shot in that language.',
+        capabilities: ['video-plate'],
+        limitations: [
+          'grading cannot turn live-action footage into a miniature diorama',
+          'no parallax route: the diorama is one continuous isometric stage, not cutout layers',
+        ],
+      },
+      {
+        renderer: 'hybrid',
+        detail: 'Approved footage inside the stage plus RGBA miniature props.',
+        capabilities: ['video-plate'],
+        limitations: ['props must match the perspective of the supplied footage'],
+      },
+    ],
+    gradeBias: {
+      saturation: 1.04,
+      contrast: 1.05,
+      brightness: 1.02,
+      tintRole: 'teal',
+      tintOpacity: 0.05,
+      vignette: 0.30,
+      grain: 0.04,
+    },
     outputCapabilities: ['deterministic 24fps output', 'full-resolution Canvas2D isometric simulation'],
     limitations: [
       'Canvas2D isometric is an approximation, not WebGL lighting',
@@ -412,11 +626,22 @@ export const STYLE_PROFILES: Readonly<Record<string, VisualStyleProfile>> = Obje
     ],
     compatibleBackends: ['canvas2d'],
     implementedBackends: ['canvas2d'],
+    mediaRoutes: [],
+    gradeBias: {
+      saturation: 1.02,
+      contrast: 1.02,
+      brightness: 1.00,
+      tintRole: 'navy',
+      tintOpacity: 0.03,
+      vignette: 0.16,
+      grain: 0.00,
+    },
     outputCapabilities: ['480x270 or 320x180 design grid, 4x nearest-neighbour to 1080p/720p'],
     limitations: [
       'detail ceiling is intentional; close-up faces are limited',
       'cannot represent photoreal skin or cloth',
       'not a substitute for cinematic illustration',
+      'no approved-media route: any footage or photographic plate would break the pixel grid',
     ],
     qualityExpectations: [
       'must be intentionally pixel art, not downscaled vector art',
@@ -447,6 +672,21 @@ export const styleSupportsBackend = (profile: VisualStyleProfile, backend: Style
 export const styleImplementsBackend = (profile: VisualStyleProfile, backend: StyleBackend): boolean =>
   profile.implementedBackends.includes(backend);
 
+export const getStyleMediaRoute = (
+  profile: VisualStyleProfile,
+  renderer: MediaRendererKind,
+): StyleMediaRoute | undefined => profile.mediaRoutes.find((route) => route.renderer === renderer);
+
+export const styleSupportsMediaRenderer = (
+  profile: VisualStyleProfile,
+  renderer: MediaRendererKind,
+): boolean => getStyleMediaRoute(profile, renderer) !== undefined;
+
+export const styleMediaRouteSupports = (
+  route: StyleMediaRoute,
+  capability: StyleMediaCapability,
+): boolean => route.capabilities.includes(capability);
+
 /**
  * The existing approved-video route. This is a production route, not a style;
  * it composes approved footage or transparent layers under a supporting style.
@@ -473,7 +713,7 @@ export const FOOTAGE_HYBRID_ROUTE = Object.freeze({
 });
 
 export type StyleBackendCapability = {
-  backend: StyleBackend;
+  backend: StyleBackend | MediaRendererKind;
   status: 'implemented' | 'framework-available' | 'BLOCKED_CAPABILITY';
   detail: string;
 };
@@ -487,9 +727,21 @@ export const STYLE_BACKEND_CAPABILITIES: readonly StyleBackendCapability[] = Obj
   },
   {
     backend: 'video',
-    status: 'framework-available',
+    status: 'implemented',
     detail:
-      'The existing video and hybrid renderers accept approved project video/layer assets with hash and probe validation. This is the footage-hybrid production route, not a style.',
+      'The existing video renderer accepts approved project video assets with hash and probe validation, and a style-driven project may bind it when the selected style declares a video media route.',
+  },
+  {
+    backend: 'hybrid',
+    status: 'implemented',
+    detail:
+      'The existing hybrid renderer composes approved footage with RGBA layers, and a style-driven project may bind it when the selected style declares a hybrid media route.',
+  },
+  {
+    backend: 'parallax-2p5d',
+    status: 'implemented',
+    detail:
+      'Asset-backed 2.5D compositor: approved PNG plates and RGBA layers on explicit depth roles with deterministic camera, parallax, atmosphere, light and optional comic treatment. Depth is layered cardboard parallax, never volumetric 3D.',
   },
   {
     backend: 'svg',

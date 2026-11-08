@@ -7,7 +7,7 @@ import {validateProjectConfig} from '../config/validate';
 import {sha256File} from '../media/hash';
 import {probeAudio} from '../media/audioProbe';
 import {probeVideo} from '../media/videoProbe';
-import {probeLayerPng} from '../media/pngProbe';
+import {probeLayerPng, probeImagePng} from '../media/pngProbe';
 import {assertMediaTimelines} from '../media/mediaTimeline';
 import {resolveShots, assertShotCoverage} from '../timeline/resolver';
 import {DEFAULT_SCENE_REGISTRY} from '../scenes/registry';
@@ -119,6 +119,9 @@ export const loadProject = (
     );
   }
 
+  const usesAssetBackedDepth = config.chapters.some((chapter) =>
+    chapter.shots.some((shot) => shot.media?.kind === 'parallax-2p5d'),
+  );
   const assets: LoadedAsset[] = config.assets.map((asset) => {
     if (asset.approval !== 'approved') {
       return {...asset, absolutePath: null, hashVerified: false};
@@ -138,6 +141,11 @@ export const loadProject = (
     }
     if (asset.kind === 'layer') {
       probeLayerPng(absolutePath, asset.id);
+    }
+    // Background plates only need decoder-level validation on the asset-backed
+    // 2.5D route; legacy image assets keep their historical intake behaviour.
+    if (asset.kind === 'image' && usesAssetBackedDepth) {
+      loaded.imageMetadata = probeImagePng(absolutePath, asset.id);
     }
     if (asset.kind === 'audio-reference') {
       loaded.audioMetadata =

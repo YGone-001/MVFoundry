@@ -30,7 +30,15 @@ export const assertMediaTimelines = (
   for (const chapter of config.chapters) {
     for (const shot of chapter.shots) {
       if (!shot.media) continue;
-      const video = shot.media.kind === 'video' ? shot.media : shot.media.video;
+      const video =
+        shot.media.kind === 'video'
+          ? shot.media
+          : shot.media.kind === 'hybrid'
+            ? shot.media.video
+            : shot.media.background.kind === 'video'
+              ? shot.media.background
+              : null;
+      if (!video) continue;
       if (video.endBehavior !== 'reject') {
         throw new MediaError(
           `Shot ${shot.id} uses unsupported endBehavior ${video.endBehavior}; only reject is supported`,

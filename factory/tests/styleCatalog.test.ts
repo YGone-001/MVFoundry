@@ -101,7 +101,9 @@ test('backend capability is declared honestly and footage-hybrid stays a route',
   const statusOf = (backend: string) =>
     STYLE_BACKEND_CAPABILITIES.find((entry) => entry.backend === backend)?.status;
   assert.equal(statusOf('canvas2d'), 'implemented');
-  assert.equal(statusOf('video'), 'framework-available');
+  assert.equal(statusOf('video'), 'implemented');
+  assert.equal(statusOf('hybrid'), 'implemented');
+  assert.equal(statusOf('parallax-2p5d'), 'implemented');
   for (const blocked of ['svg', 'html', 'three']) {
     assert.equal(statusOf(blocked), 'BLOCKED_CAPABILITY', `${blocked} is not implemented`);
   }
