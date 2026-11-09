@@ -317,6 +317,18 @@ Do not treat plans, prior reports or user summaries as proof of the current file
 - Planned 2.5D light supports amplitude/frequency/phase only. A `sweep` is refused in a planned shot and must be authored directly in `project.json`.
 - Technical acceptance and artistic acceptance stay separate. A decoded MP4 proves codec, timing, determinism and audio alignment; it does not prove taste, and no engine artifact may be labelled as a human artistic approval.
 
+### High-fidelity source art and cinematic art quality
+
+- Procedural Canvas art is not production-grade illustration. The engine distinguishes `TECHNICAL_PLACEHOLDER`, `ARTISTIC_CONCEPT`, `REVIEW_CANDIDATE` and `ARTISTICALLY_APPROVED_SOURCE`. A PNG that passes schema, alpha, dimension and hash checks is not an approved source. `BLOCKED_ART_ASSET_QUALITY` remains until a human reviews the actual image.
+- Source-art packages, character sheets, environment plates, contact sheets, exports and review boards stay in the external workspace. Private art paths, rights records and review packages never enter this repository, tests, fixtures or CI artifacts.
+- Every accepted source reuses the existing asset fields: asset id, project-relative source path, source category in the provenance text, rights assertion, SHA256, probed dimensions/format/alpha, continuity identity, intended shot/slot, style compatibility, review state and derivative relationship in provenance. No second asset schema is introduced.
+- `attach-asset` binds renderer-compatible requirement kinds through `requirementSupportsRenderer` (`factory/src/preproduction/assetBinding.ts`): `layered-canvas` accepts `image`; `video` accepts `video`; `hybrid` accepts `video`/`layer`; `parallax-2p5d` accepts `image` (background plate) and `layer` (depth layer or character pose). The planned 2.5D authoring path emits those two kinds; a direct `project.json` video background remains a config capability, not a planned-intake route. Unknown renderers fail closed. `assetBinding.test.ts` covers the positive routes, the unchanged legacy routes and the negative controls.
+- Character poses for one shot share canvas, screen anchor, pivot, scale and baked scene light. `pivotX/pivotY` is inside the artwork; `anchorX/anchorY` is the screen point where that pivot is placed. The compositor grades and composites but cannot relight a figure, so a pose painted under a different key is a rejected asset, not a grade problem.
+- A real head turn needs real intermediate drawings. Crossfades are limited to compatible same-angle drawings; silhouette-changing turns use cuts. This is the documented defence against double-face ghosting, identity drift and neck separation. The engine verifies tiling, not anatomy.
+- Technical validity, decoded-render validity and artistic acceptance are three separate verdicts. Never set `HUMAN_ARTISTIC_ACCEPTANCE` from a pixel difference, saturation, edge count, PNG probe, renderer exit status or pose count.
+- 2.5D remains layered cardboard parallax: no volumetric 3D, no real depth of field, no blend modes. Reflections, mist and glow are authored into the art. Layer motion is bounded at ±0.7 of frame width and camera travel at ±0.25. A claimed offscreen exit is invalid unless decoded frames show it; a lateral tram pass is not a 3D approach.
+- Source-art generation, provider calls, uploads and paid execution require separate authorization. No brief, intake record or project flag grants it. A rights record is a user assertion, not independent legal verification.
+
 ### Timeline and rendering
 
 - Integer output frames are the canonical editing clock; scene ranges are half-open `[startFrame, endFrame)`.

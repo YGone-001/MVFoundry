@@ -68,6 +68,7 @@ const {sha256File} = require('../dist/src/media/hash.js');
 const {probeVideo} = require('../dist/src/media/videoProbe.js');
 const {probeLayerPng, probeImagePng} = require('../dist/src/media/pngProbe.js');
 const {analyzeBeatGrid, buildApprovedBeatGrid} = require('../dist/src/preproduction/beatGrid.js');
+const {requirementSupportsRenderer} = require('../dist/src/preproduction/assetBinding.js');
 const {
   validateAnnotations,
   validateApprovedBeatGrid,
@@ -638,11 +639,10 @@ const run = () => {
     if (!provenance) fail('--provenance is required: record where this asset came from');
     const rights = arg('rights');
     if (!rights) fail('--rights is required: record the usage assertion for this asset');
-    if (['video', 'layer'].includes(requirement.kind) && !['video', 'hybrid'].includes(requirement.renderer)) {
-      fail(`Requirement ${requirementId} is a ${requirement.kind} but targets renderer ${requirement.renderer}, which cannot bind it`);
-    }
-    if (requirement.kind === 'image' && requirement.renderer !== 'layered-canvas') {
-      fail(`Requirement ${requirementId} is an image and can only bind to layered-canvas`);
+    if (!requirementSupportsRenderer(requirement.kind, requirement.renderer)) {
+      fail(
+        `Requirement ${requirementId} is a ${requirement.kind} but targets renderer ${requirement.renderer}, which cannot consume that asset kind`,
+      );
     }
     const absolute = resolveProjectRelativePath(project.projectDir, relativePath, {engineRoot: repoRoot});
     if (!existsSync(absolute)) fail(`Local asset ${relativePath} does not exist`);
