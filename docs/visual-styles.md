@@ -150,7 +150,8 @@ Contracts:
 - `comic` is optional and only valid when the style declares `comic-treatment`.
 - Grading comes from the style's declared `gradeBias`; per-shot `grade` overrides are bounded and colours must be `#rrggbb`.
 - The shot-local output frame is the only motion input. The same frame always produces the same image.
-- Preproduction planning and storyboard compilation still accept Canvas, video and hybrid media only. A 2.5D shot is authored directly in `project.json` in this phase; generating one from a storyboard is not implemented.
+- A style may declare `characters` on a 2.5D shot: a `poses[]` track of approved `layer` assets that tile the shot-local clock exactly. `cut` swaps on one frame, `crossfade` blends 2–12 frames, and the artwork pivot stays pinned to the authored anchor so a pose change never makes the subject jump. Flipping one drawing is not a pose.
+- Preproduction planning and storyboard compilation now accept `parallax-2p5d` media alongside Canvas, video and hybrid: a planned shot declares a background plate slot, one slot per depth layer, one slot per character pose, depth roles, camera, atmosphere and light. Planned light is limited to amplitude/frequency/phase; a `sweep` must be authored directly in `project.json`.
 
 ## Commands
 

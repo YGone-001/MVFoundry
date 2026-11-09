@@ -9,8 +9,10 @@ import type {
   ComicTreatmentConfig,
   GradeConfig,
   LayerMotionConfig,
+  ParallaxCharacterConfig,
   ParallaxLayerConfig,
   ParallaxLayerRole,
+  ParallaxPoseKeyframe,
 } from '../config/types';
 import type {StylePaletteRole, VisualStyleProfile} from '../style/catalog';
 
@@ -147,6 +149,133 @@ export const resolveLayerDepthTransform = (
 };
 
 export const ROLE_RANK = (role: ParallaxLayerRole): number => ROLE_ORDER[role];
+
+/* -------------------------------------------------------------------------- */
+/* Character performance                                                       */
+/* -------------------------------------------------------------------------- */
+
+export type CharacterPoseSample = {
+  assetId: string;
+  /** Blend weight for this pose, already multiplied by the pose opacity. */
+  opacity: number;
+  offsetX: number;
+  offsetY: number;
+  scale: number;
+};
+
+export type CharacterPerformanceSample = {
+  poses: CharacterPoseSample[];
+  /** Idle sway in fractions of the output frame. Not camera motion. */
+  idleX: number;
+  idleY: number;
+  /** Idle breathing scale multiplier. */
+  idleScale: number;
+};
+
+/**
+ * Half-open pose range lookup. A frame outside every range is an authoring bug,
+ * so it fails closed instead of silently freezing the last drawing.
+ */
+export const activePoseIndex = (poses: readonly ParallaxPoseKeyframe[], frame: number): number => {
+  const index = poses.findIndex((pose) => frame >= pose.fromFrame && frame < pose.toFrame);
+  if (index < 0) {
+    throw new Error(`Character pose timeline does not cover local frame ${frame}`);
+  }
+  return index;
+};
+
+const idleWave = (
+  config: {amplitude: number; periodFrames: number} | undefined,
+  frame: number,
+): number =>
+  config === undefined || config.amplitude === 0
+    ? 0
+    : config.amplitude * Math.sin((frame / config.periodFrames) * Math.PI * 2);
+
+/**
+ * Samples the authored pose track for one shot-local frame. A crossfade blends
+ * the outgoing pose with the incoming one; a cut resolves on exactly one frame.
+ * The result depends only on (poses, frame), so repeated renders match.
+ */
+export const sampleCharacterPerformance = (
+  character: ParallaxCharacterConfig,
+  frame: number,
+): CharacterPerformanceSample => {
+  const poses = character.poses;
+  const index = activePoseIndex(poses, frame);
+  const current = poses[index];
+  const outgoing = index > 0 ? poses[index - 1] : undefined;
+  const fadeFrames = current.transition === 'crossfade' ? current.fadeFrames : 0;
+  const sinceStart = frame - current.fromFrame;
+  const sample: CharacterPoseSample = {
+    assetId: current.assetId,
+    opacity: current.opacity,
+    offsetX: current.offsetX,
+    offsetY: current.offsetY,
+    scale: current.scale,
+  };
+  const result: CharacterPerformanceSample = {
+    poses: [sample],
+    idleX: idleWave(character.sway, frame),
+    idleY: 0,
+    idleScale: 1 + idleWave(character.breathe, frame),
+  };
+  if (outgoing && fadeFrames > 0 && sinceStart < fadeFrames) {
+    const raw = clampProgress((sinceStart + 1) / fadeFrames);
+    const incoming = raw * raw * (3 - 2 * raw);
+    result.poses = [
+      {
+        assetId: outgoing.assetId,
+        opacity: outgoing.opacity * (1 - incoming),
+        offsetX: outgoing.offsetX,
+        offsetY: outgoing.offsetY,
+        scale: outgoing.scale,
+      },
+      {
+        assetId: current.assetId,
+        opacity: current.opacity * incoming,
+        offsetX: current.offsetX,
+        offsetY: current.offsetY,
+        scale: current.scale,
+      },
+    ];
+  }
+  return result;
+};
+
+/** Draw order shared by static layers and characters; larger draws nearer. */
+export type DrawEntry =
+  | {kind: 'layer'; order: number; layer: ParallaxLayerConfig}
+  | {kind: 'character'; order: number; character: ParallaxCharacterConfig};
+
+export const mergeDrawOrder = (
+  layers: readonly ParallaxLayerConfig[],
+  characters: readonly ParallaxCharacterConfig[] = [],
+): DrawEntry[] => {
+  const entries: DrawEntry[] = [
+    ...layers.map((layer) => ({kind: 'layer' as const, order: layer.order, layer})),
+    ...characters.map((character) => ({
+      kind: 'character' as const,
+      order: character.order,
+      character,
+    })),
+  ];
+  return entries.sort((left, right) => left.order - right.order);
+};
+
+/**
+ * Character depth follows the camera exactly like a layer, but without plate
+ * overscan: a cutout keeps its own art margin, and scaling it for an opaque
+ * plate's edge safety would shrink the subject for no reason.
+ */
+export const resolveCharacterDepthTransform = (
+  character: Pick<ParallaxCharacterConfig, 'parallax'>,
+  shaft: CameraSample,
+): {translateX: number; translateY: number; zoom: number} => ({
+  translateX: -shaft.x * character.parallax,
+  translateY: -shaft.y * character.parallax,
+  zoom: 1 + (shaft.zoom - 1) * (0.35 + 0.65 * character.parallax),
+});
 
 const paletteValue = (
   palette: readonly StylePaletteRole[],

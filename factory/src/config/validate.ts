@@ -42,8 +42,11 @@ import type {
   MediaFit,
   NarrativeMode,
   ParallaxBackgroundConfig,
+  ParallaxCharacterConfig,
+  ParallaxCharacterIdleConfig,
   ParallaxLayerConfig,
   ParallaxLayerRole,
+  ParallaxPoseKeyframe,
   ProjectAsset,
   ProjectAssetKind,
   ProjectConfig,
@@ -553,6 +556,157 @@ const validateParallaxLayer = (
   };
 };
 
+const validateParallaxIdle = (
+  value: unknown,
+  field: string,
+): ParallaxCharacterIdleConfig => {
+  const idle = record(value, field);
+  assertKeys(idle, ['amplitude', 'periodFrames'], field);
+  return {
+    amplitude: numberInRange(idle.amplitude, `${field}.amplitude`, 0, 0.06),
+    periodFrames: numberInRange(idle.periodFrames, `${field}.periodFrames`, 8, 240),
+  };
+};
+
+/**
+ * A character pose sequence is the authored performance. It must tile the shot
+ * exactly: no gap, no overlap and no substitute for an unapproved drawing.
+ */
+const validateParallaxCharacters = (
+  value: unknown,
+  field: string,
+  assetById: ReadonlyMap<string, ProjectAsset>,
+  shotLength: number,
+): ParallaxCharacterConfig[] => {
+  const raw = value === undefined ? [] : array(value, field);
+  if (raw.length === 0) return [];
+  if (raw.length > 4) fail(`${field} must contain at most 4 characters`);
+  const characters = raw.map((entry, index) => {
+    const entryField = `${field}[${index}]`;
+    const character = record(entry, entryField);
+    assertKeys(
+      character,
+      [
+        'characterId',
+        'role',
+        'order',
+        'parallax',
+        'anchorX',
+        'anchorY',
+        'pivotX',
+        'pivotY',
+        'height',
+        'breathe',
+        'sway',
+        'poses',
+      ],
+      entryField,
+    );
+    const characterId = text(character.characterId, `${entryField}.characterId`);
+    if (!/^[a-z0-9][a-z0-9-]{1,31}$/.test(characterId)) {
+      fail(`${entryField}.characterId must be a lowercase id`);
+    }
+    if (character.role !== 'subject') {
+      fail(`${entryField}.role must be "subject"; other roles are static layers`);
+    }
+    const order = integer(character.order, `${entryField}.order`, 0);
+    if (order > 31) fail(`${entryField}.order must be at most 31`);
+    const range = ROLE_PARALLAX_RANGES.subject;
+    const parallax = numberInRange(character.parallax, `${entryField}.parallax`, range.min, range.max);
+    const anchorX = numberInRange(character.anchorX, `${entryField}.anchorX`, -0.25, 1.25);
+    const anchorY = numberInRange(character.anchorY, `${entryField}.anchorY`, 0, 1.6);
+    const pivotX = numberInRange(character.pivotX, `${entryField}.pivotX`, 0, 1);
+    const pivotY = numberInRange(character.pivotY, `${entryField}.pivotY`, 0, 1);
+    const height = numberInRange(character.height, `${entryField}.height`, 0.1, 2);
+    const breathe =
+      character.breathe === undefined
+        ? undefined
+        : validateParallaxIdle(character.breathe, `${entryField}.breathe`);
+    const sway =
+      character.sway === undefined
+        ? undefined
+        : validateParallaxIdle(character.sway, `${entryField}.sway`);
+
+    const rawPoses = array(character.poses, `${entryField}.poses`);
+    if (rawPoses.length === 0) fail(`${entryField}.poses must declare at least one pose`);
+    if (rawPoses.length > 24) fail(`${entryField}.poses must declare at most 24 poses`);
+    const poses: ParallaxPoseKeyframe[] = rawPoses.map((poseValue, poseIndex) => {
+      const poseField = `${entryField}.poses[${poseIndex}]`;
+      const pose = record(poseValue, poseField);
+      assertKeys(
+        pose,
+        ['assetId', 'fromFrame', 'toFrame', 'transition', 'fadeFrames', 'offsetX', 'offsetY', 'scale', 'opacity'],
+        poseField,
+      );
+      const assetId = text(pose.assetId, `${poseField}.assetId`);
+      assertApprovedAssetKind(assetById, assetId, 'layer', `${poseField}.assetId`);
+      const fromFrame = integer(pose.fromFrame, `${poseField}.fromFrame`, 0);
+      const toFrame = integer(pose.toFrame, `${poseField}.toFrame`, 0);
+      if (toFrame <= fromFrame) fail(`${poseField} range must be non-empty`);
+      if (toFrame > shotLength) {
+        fail(`${poseField}.toFrame exceeds the shot-local duration ${shotLength}`);
+      }
+      const transition = oneOf(
+        pose.transition === undefined ? 'cut' : pose.transition,
+        ['cut', 'crossfade'] as const,
+        `${poseField}.transition`,
+      );
+      const fadeFrames =
+        transition === 'cut'
+          ? optionalNumberInRange(pose.fadeFrames, `${poseField}.fadeFrames`, 0, 0, 0)
+          : numberInRange(pose.fadeFrames ?? 4, `${poseField}.fadeFrames`, 2, 12);
+      if (fadeFrames >= toFrame - fromFrame) {
+        fail(`${poseField}.fadeFrames must stay inside its own pose range`);
+      }
+      return {
+        assetId,
+        fromFrame,
+        toFrame,
+        transition,
+        fadeFrames,
+        offsetX: numberInRange(pose.offsetX ?? 0, `${poseField}.offsetX`, -0.7, 0.7),
+        offsetY: numberInRange(pose.offsetY ?? 0, `${poseField}.offsetY`, -0.5, 0.5),
+        scale: numberInRange(pose.scale ?? 1, `${poseField}.scale`, 0.5, 2.5),
+        opacity: numberInRange(pose.opacity ?? 1, `${poseField}.opacity`, 0, 1),
+      };
+    });
+    let cursor = 0;
+    for (const [poseIndex, pose] of poses.entries()) {
+      if (pose.fromFrame !== cursor) {
+        fail(
+          `${entryField}.poses[${poseIndex}] starts at ${pose.fromFrame} but the previous pose ended at ${cursor}; poses must tile the shot`,
+        );
+      }
+      cursor = pose.toFrame;
+    }
+    if (cursor !== shotLength) {
+      fail(`${entryField}.poses end at ${cursor} but the shot lasts ${shotLength} frames`);
+    }
+    return {
+      characterId,
+      role: 'subject' as const,
+      order,
+      parallax,
+      anchorX,
+      anchorY,
+      pivotX,
+      pivotY,
+      height,
+      ...(breathe === undefined ? {} : {breathe}),
+      ...(sway === undefined ? {} : {sway}),
+      poses,
+    };
+  });
+  const ids = new Set<string>();
+  for (const character of characters) {
+    if (ids.has(character.characterId)) {
+      fail(`${field} contains duplicate characterId ${character.characterId}`);
+    }
+    ids.add(character.characterId);
+  }
+  return characters;
+};
+
 const validateParallaxBackground = (
   value: unknown,
   field: string,
@@ -810,7 +964,7 @@ const validateParallaxMedia = (
   const media = record(value, field);
   assertKeys(
     media,
-    ['kind', 'background', 'layers', 'camera', 'atmosphere', 'light', 'grade', 'comic'],
+    ['kind', 'background', 'layers', 'characters', 'camera', 'atmosphere', 'light', 'grade', 'comic'],
     field,
   );
   const background = validateParallaxBackground(
@@ -825,10 +979,24 @@ const validateParallaxMedia = (
   const layers = rawLayers.map((layer, index) =>
     validateParallaxLayer(layer, `${field}.layers[${index}]`, assetById, shotLength),
   );
+  const characters = validateParallaxCharacters(
+    media.characters,
+    `${field}.characters`,
+    assetById,
+    shotLength,
+  );
   const orders = new Set<number>();
   for (const layer of layers) {
     if (orders.has(layer.order)) fail(`${field}.layers contains duplicate order ${layer.order}`);
     orders.add(layer.order);
+  }
+  for (const character of characters) {
+    if (orders.has(character.order)) {
+      fail(
+        `${field} character ${character.characterId} reuses order ${character.order}; draw order must be unambiguous across layers and characters`,
+      );
+    }
+    orders.add(character.order);
   }
   for (const role of ['midground', 'foreground'] as const) {
     if (!layers.some((layer) => layer.role === role)) {
@@ -836,16 +1004,24 @@ const validateParallaxMedia = (
     }
   }
   let previousRank = -1;
-  for (const layer of [...layers].sort((left, right) => left.order - right.order)) {
-    const rank = ROLE_ORDER[layer.role];
+  const drawOrder: Array<{order: number; role: ParallaxLayerRole}> = [
+    ...layers.map((layer) => ({order: layer.order, role: layer.role})),
+    ...characters.map((character) => ({order: character.order, role: character.role})),
+  ].sort((left, right) => left.order - right.order);
+  for (const entry of drawOrder) {
+    const rank = ROLE_ORDER[entry.role];
     if (rank < previousRank) {
       fail(
-        `${field}.layers draw order is wrong: ${layer.role} appears after a nearer depth tier; background, midground, subject, foreground must increase with order`,
+        `${field} draw order is wrong: ${entry.role} appears after a nearer depth tier; background, midground, subject, foreground must increase with order`,
       );
     }
     previousRank = rank;
   }
-  const depths = [background.parallax, ...layers.map((layer) => layer.parallax)];
+  const depths = [
+    background.parallax,
+    ...layers.map((layer) => layer.parallax),
+    ...characters.map((character) => character.parallax),
+  ];
   if (Math.max(...depths) - Math.min(...depths) < 0.25) {
     fail(
       `${field} depth span must be at least 0.25 between the nearest and farthest layer so parallax is measurable`,
@@ -863,6 +1039,7 @@ const validateParallaxMedia = (
     kind: 'parallax-2p5d',
     background,
     layers,
+    ...(characters.length === 0 ? {} : {characters}),
     camera,
     atmosphere,
     light,

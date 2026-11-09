@@ -1,5 +1,5 @@
 import {PreproductionError} from '../errors';
-import type {MediaFit, ProjectAsset, ProjectAssetKind} from '../config/types';
+import type {CameraMoveConfig, MediaFit, ProjectAsset, ProjectAssetKind} from '../config/types';
 import type {
   AnnotationDocument,
   ApprovedBeatGrid,
@@ -23,6 +23,11 @@ import type {
   ManualBpm,
   ManualCutCue,
   PlannedHybridLayer,
+  PlannedLayerMotion,
+  PlannedParallaxCharacter,
+  PlannedParallaxLayer,
+  PlannedParallaxMedia,
+  PlannedParallaxPose,
   PlannedShotMedia,
   SectionAnnotation,
 } from './types';
@@ -354,6 +359,298 @@ const validateMediaTransform = (
   return {fit, positionX, positionY, scale};
 };
 
+const bounded = (value: unknown, field: string, minimum: number, maximum: number): number => {
+  const parsed = number(value, field);
+  if (parsed < minimum || parsed > maximum) {
+    fail(`${field} must be in [${minimum}, ${maximum}]`);
+  }
+  return parsed;
+};
+
+const PLANNED_PARALLAX_ROLES = ['midground', 'subject', 'foreground'] as const;
+const PLANNED_ROLE_RANK: Readonly<Record<(typeof PLANNED_PARALLAX_ROLES)[number], number>> = {
+  midground: 0,
+  subject: 1,
+  foreground: 2,
+};
+const PLANNED_ROLE_PARALLAX: Readonly<
+  Record<(typeof PLANNED_PARALLAX_ROLES)[number], {min: number; max: number}>
+> = {
+  midground: {min: 0.1, max: 0.6},
+  subject: {min: 0.45, max: 0.9},
+  foreground: {min: 0.8, max: 1},
+};
+
+const validatePlannedLayerMotion = (value: unknown, field: string): PlannedLayerMotion => {
+  const motion = record(value, field);
+  assertKeys(
+    motion,
+    ['translateXFrom', 'translateXTo', 'translateYFrom', 'translateYTo', 'fromFrame', 'toFrame', 'easing'],
+    field,
+  );
+  const result: PlannedLayerMotion = {
+    translateXFrom: bounded(motion.translateXFrom, `${field}.translateXFrom`, -0.7, 0.7),
+    translateXTo: bounded(motion.translateXTo, `${field}.translateXTo`, -0.7, 0.7),
+    translateYFrom: bounded(motion.translateYFrom, `${field}.translateYFrom`, -0.7, 0.7),
+    translateYTo: bounded(motion.translateYTo, `${field}.translateYTo`, -0.7, 0.7),
+    easing: oneOf(motion.easing === undefined ? 'easeInOut' : motion.easing, ['linear', 'easeInOut'] as const, `${field}.easing`),
+  };
+  if (motion.fromFrame !== undefined) result.fromFrame = integer(motion.fromFrame, `${field}.fromFrame`);
+  if (motion.toFrame !== undefined) result.toFrame = integer(motion.toFrame, `${field}.toFrame`);
+  if (
+    Math.abs(result.translateXFrom - result.translateXTo) < 1e-9 &&
+    Math.abs(result.translateYFrom - result.translateYTo) < 1e-9
+  ) {
+    fail(`${field} declares no movement; omit motion for a static layer`);
+  }
+  return result;
+};
+
+const validatePlannedCamera = (value: unknown, field: string): CameraMoveConfig => {
+  const camera = record(value, field);
+  assertKeys(camera, ['kind', 'fromX', 'fromY', 'fromZoom', 'toX', 'toY', 'toZoom', 'easing'], field);
+  const kind = oneOf(camera.kind, ['pan', 'push-in', 'pull-back', 'hold'] as const, `${field}.kind`);
+  const limit = 0.25;
+  const result: CameraMoveConfig = {
+    kind,
+    fromX: bounded(camera.fromX, `${field}.fromX`, -limit, limit),
+    fromY: bounded(camera.fromY, `${field}.fromY`, -limit, limit),
+    fromZoom: bounded(camera.fromZoom, `${field}.fromZoom`, 1, 2.5),
+    toX: bounded(camera.toX, `${field}.toX`, -limit, limit),
+    toY: bounded(camera.toY, `${field}.toY`, -limit, limit),
+    toZoom: bounded(camera.toZoom, `${field}.toZoom`, 1, 2.5),
+    easing: oneOf(camera.easing === undefined ? 'easeInOut' : camera.easing, ['linear', 'easeInOut'] as const, `${field}.easing`),
+  };
+  const travel = Math.abs(result.toX - result.fromX) + Math.abs(result.toY - result.fromY);
+  const zoomDelta = result.toZoom - result.fromZoom;
+  if (kind === 'pan' && (Math.abs(zoomDelta) > 1e-9 || travel < 1e-6)) {
+    fail(`${field}.kind pan requires a moving camera with a constant zoom`);
+  }
+  if (kind === 'push-in' && !(zoomDelta > 1e-6)) {
+    fail(`${field}.kind push-in requires toZoom > fromZoom`);
+  }
+  if (kind === 'pull-back' && !(zoomDelta < -1e-6)) {
+    fail(`${field}.kind pull-back requires toZoom < fromZoom`);
+  }
+  if (kind === 'hold' && (travel > 1e-6 || Math.abs(zoomDelta) > 1e-6)) {
+    fail(`${field}.kind hold requires an unmoving camera`);
+  }
+  return result;
+};
+
+/**
+ * A planned 2.5D shot names requirement slots, not asset IDs. Depth roles,
+ * draw order, camera bounds and pose geometry are validated here so a plan can
+ * never compile into a shot the project validator would reject later.
+ */
+const validatePlannedParallax = (
+  media: Record<string, unknown>,
+  field: string,
+): PlannedParallaxMedia => {
+  assertKeys(
+    media,
+    ['kind', 'backgroundSlot', 'background', 'camera', 'atmosphere', 'light', 'layers', 'characters'],
+    field,
+  );
+  const backgroundSlot = text(media.backgroundSlot, `${field}.backgroundSlot`);
+  const background = record(media.background, `${field}.background`);
+  assertKeys(
+    background,
+    ['parallax', 'opacity', 'fit', 'positionX', 'positionY', 'scale', 'blur'],
+    `${field}.background`,
+  );
+  const backgroundParsed = {
+    parallax: bounded(background.parallax, `${field}.background.parallax`, 0, 0.12),
+    opacity: background.opacity === undefined ? 1 : UNIT_RANGE(background.opacity, `${field}.background.opacity`),
+    ...validateMediaTransform(background, `${field}.background`),
+    ...(background.blur === undefined
+      ? {}
+      : {blur: bounded(background.blur, `${field}.background.blur`, 0, 16)}),
+  };
+
+  const rawLayers = array(media.layers, `${field}.layers`);
+  if (rawLayers.length === 0) fail(`${field}.layers must contain at least one layer`);
+  if (rawLayers.length > 16) fail(`${field}.layers must contain at most 16 layers`);
+  const layers: PlannedParallaxLayer[] = rawLayers.map((layerValue, index) => {
+    const layerField = `${field}.layers[${index}]`;
+    const layer = record(layerValue, layerField);
+    assertKeys(
+      layer,
+      [
+        'slot', 'role', 'order', 'parallax', 'opacity', 'fit', 'positionX', 'positionY',
+        'scale', 'blur', 'visibleFromFrame', 'visibleToFrame', 'motion',
+      ],
+      layerField,
+    );
+    const role = oneOf(layer.role, PLANNED_PARALLAX_ROLES, `${layerField}.role`);
+    const range = PLANNED_ROLE_PARALLAX[role];
+    const order = integer(layer.order, `${layerField}.order`);
+    if (order > 31) fail(`${layerField}.order must be at most 31`);
+    const visibleFromFrame = integer(layer.visibleFromFrame ?? 0, `${layerField}.visibleFromFrame`);
+    const visibleToFrame = integer(layer.visibleToFrame, `${layerField}.visibleToFrame`, 1);
+    if (visibleFromFrame >= visibleToFrame) fail(`${layerField} visibility range must be non-empty`);
+    return {
+      slot: text(layer.slot, `${layerField}.slot`),
+      role,
+      order,
+      parallax: bounded(layer.parallax, `${layerField}.parallax`, range.min, range.max),
+      opacity: layer.opacity === undefined ? 1 : UNIT_RANGE(layer.opacity, `${layerField}.opacity`),
+      ...validateMediaTransform(layer, layerField),
+      ...(layer.blur === undefined ? {} : {blur: bounded(layer.blur, `${layerField}.blur`, 0, 16)}),
+      visibleFromFrame,
+      visibleToFrame,
+      ...(layer.motion === undefined
+        ? {}
+        : {motion: validatePlannedLayerMotion(layer.motion, `${layerField}.motion`)}),
+    };
+  });
+
+  const rawCharacters = media.characters === undefined ? [] : array(media.characters, `${field}.characters`);
+  if (rawCharacters.length > 4) fail(`${field}.characters must contain at most 4 characters`);
+  const characters: PlannedParallaxCharacter[] = rawCharacters.map((entry, index) => {
+    const entryField = `${field}.characters[${index}]`;
+    const character = record(entry, entryField);
+    assertKeys(
+      character,
+      ['characterId', 'order', 'parallax', 'anchorX', 'anchorY', 'pivotX', 'pivotY', 'height', 'breathe', 'sway', 'poses'],
+      entryField,
+    );
+    const characterId = text(character.characterId, `${entryField}.characterId`);
+    if (!ID_PATTERN.test(characterId)) fail(`${entryField}.characterId must be a lowercase id`);
+    const rawPoses = array(character.poses, `${entryField}.poses`);
+    if (rawPoses.length === 0) fail(`${entryField}.poses must declare at least one pose`);
+    if (rawPoses.length > 24) fail(`${entryField}.poses must declare at most 24 poses`);
+    const poses: PlannedParallaxPose[] = rawPoses.map((poseValue, poseIndex) => {
+      const poseField = `${entryField}.poses[${poseIndex}]`;
+      const pose = record(poseValue, poseField);
+      assertKeys(
+        pose,
+        ['slot', 'fromFrame', 'toFrame', 'transition', 'fadeFrames', 'offsetX', 'offsetY', 'scale', 'opacity'],
+        poseField,
+      );
+      const transition = oneOf(
+        pose.transition === undefined ? 'cut' : pose.transition,
+        ['cut', 'crossfade'] as const,
+        `${poseField}.transition`,
+      );
+      const fadeFrames =
+        transition === 'cut'
+          ? bounded(pose.fadeFrames ?? 0, `${poseField}.fadeFrames`, 0, 0)
+          : bounded(pose.fadeFrames ?? 4, `${poseField}.fadeFrames`, 2, 12);
+      return {
+        slot: text(pose.slot, `${poseField}.slot`),
+        fromFrame: integer(pose.fromFrame, `${poseField}.fromFrame`),
+        toFrame: integer(pose.toFrame, `${poseField}.toFrame`, 1),
+        transition,
+        fadeFrames,
+        offsetX: bounded(pose.offsetX ?? 0, `${poseField}.offsetX`, -0.7, 0.7),
+        offsetY: bounded(pose.offsetY ?? 0, `${poseField}.offsetY`, -0.5, 0.5),
+        scale: bounded(pose.scale ?? 1, `${poseField}.scale`, 0.5, 2.5),
+        opacity: bounded(pose.opacity ?? 1, `${poseField}.opacity`, 0, 1),
+      };
+    });
+    const idle = (value: unknown, idleField: string) => {
+      const parsed = record(value, idleField);
+      assertKeys(parsed, ['amplitude', 'periodFrames'], idleField);
+      return {
+        amplitude: bounded(parsed.amplitude, `${idleField}.amplitude`, 0, 0.06),
+        periodFrames: bounded(parsed.periodFrames, `${idleField}.periodFrames`, 8, 240),
+      };
+    };
+    return {
+      characterId,
+      order: integer(character.order, `${entryField}.order`),
+      parallax: bounded(character.parallax, `${entryField}.parallax`, 0.45, 0.9),
+      anchorX: bounded(character.anchorX, `${entryField}.anchorX`, -0.25, 1.25),
+      anchorY: bounded(character.anchorY, `${entryField}.anchorY`, 0, 1.6),
+      pivotX: bounded(character.pivotX, `${entryField}.pivotX`, 0, 1),
+      pivotY: bounded(character.pivotY, `${entryField}.pivotY`, 0, 1),
+      height: bounded(character.height, `${entryField}.height`, 0.1, 2),
+      ...(character.breathe === undefined ? {} : {breathe: idle(character.breathe, `${entryField}.breathe`)}),
+      ...(character.sway === undefined ? {} : {sway: idle(character.sway, `${entryField}.sway`)}),
+      poses,
+    };
+  });
+
+  const slots = new Set<string>();
+  const orders = new Set<number>();
+  const claimSlot = (slot: string, slotField: string): void => {
+    if (slot === backgroundSlot) fail(`${slotField} must differ from backgroundSlot`);
+    if (slots.has(slot)) fail(`Planned media slot ${slot} is declared twice`);
+    slots.add(slot);
+  };
+  for (const layer of layers) {
+    claimSlot(layer.slot, `${field}.layers[${layers.indexOf(layer)}].slot`);
+    if (orders.has(layer.order)) fail(`${field}.layers contains duplicate order ${layer.order}`);
+    orders.add(layer.order);
+  }
+  const characterIds = new Set<string>();
+  for (const character of characters) {
+    if (characterIds.has(character.characterId)) {
+      fail(`${field}.characters contains duplicate characterId ${character.characterId}`);
+    }
+    characterIds.add(character.characterId);
+    if (orders.has(character.order)) fail(`${field} character reuses order ${character.order}`);
+    orders.add(character.order);
+    for (const pose of character.poses) claimSlot(pose.slot, `${field}.characters[${character.characterId}].poses`);
+  }
+  if (!layers.some((layer) => layer.role === 'midground')) fail(`${field}.layers requires a midground layer`);
+  if (!layers.some((layer) => layer.role === 'foreground')) fail(`${field}.layers requires a foreground layer`);
+  if (!layers.some((layer) => layer.role === 'subject') && characters.length === 0) {
+    fail(`${field} requires a subject layer or a character performance`);
+  }
+  let previousRank = -1;
+  const drawOrder = [
+    ...layers.map((layer) => ({order: layer.order, role: layer.role})),
+    ...characters.map((character) => ({
+      order: character.order,
+      role: 'subject' as (typeof PLANNED_PARALLAX_ROLES)[number],
+    })),
+  ].sort((left, right) => left.order - right.order);
+  for (const entry of drawOrder) {
+    const rank = PLANNED_ROLE_RANK[entry.role];
+    if (rank < previousRank) {
+      fail(`${field} draw order must increase with depth: midground, subject, foreground`);
+    }
+    previousRank = rank;
+  }
+  const depths = [
+    backgroundParsed.parallax,
+    ...layers.map((layer) => layer.parallax),
+    ...characters.map((character) => character.parallax),
+  ];
+  if (Math.max(...depths) - Math.min(...depths) < 0.25) {
+    fail(`${field} depth span must be at least 0.25 between the nearest and farthest layer`);
+  }
+
+  const atmosphereRaw = record(media.atmosphere, `${field}.atmosphere`);
+  assertKeys(atmosphereRaw, ['kind', 'intensity', 'windX'], `${field}.atmosphere`);
+  const lightRaw = record(media.light, `${field}.light`);
+  assertKeys(lightRaw, ['amplitude', 'frequency', 'phase', 'sweep'], `${field}.light`);
+  if (lightRaw.sweep !== undefined && lightRaw.sweep !== null) {
+    fail(`${field}.light.sweep is not supported in a planned 2.5D shot; author it directly in project.json`);
+  }
+
+  return {
+    kind: 'parallax-2p5d',
+    backgroundSlot,
+    background: backgroundParsed,
+    camera: validatePlannedCamera(media.camera, `${field}.camera`),
+    atmosphere: {
+      kind: oneOf(atmosphereRaw.kind === undefined ? 'none' : atmosphereRaw.kind, ['rain', 'mist', 'rain-mist', 'none'] as const, `${field}.atmosphere.kind`),
+      intensity: UNIT_RANGE(atmosphereRaw.intensity, `${field}.atmosphere.intensity`),
+      windX: bounded(atmosphereRaw.windX, `${field}.atmosphere.windX`, -1, 1),
+    },
+    light: {
+      amplitude: bounded(lightRaw.amplitude, `${field}.light.amplitude`, 0, 1),
+      frequency: bounded(lightRaw.frequency, `${field}.light.frequency`, 0, 8),
+      phase: bounded(lightRaw.phase, `${field}.light.phase`, -1, 1),
+    },
+    layers,
+    characters,
+  };
+};
+
 /**
  * Planned media is validated structurally here. The shot-local bounds that the
  * project validator enforces (visibility inside the shot, frame-aligned
@@ -366,9 +663,12 @@ export const validatePlannedMedia = (
 ): PlannedShotMedia | null => {
   if (value === null || value === undefined) return null;
   const media = record(value, field);
-  const kind = oneOf(media.kind, ['video', 'hybrid'] as const, `${field}.kind`);
+  const kind = oneOf(media.kind, ['video', 'hybrid', 'parallax-2p5d'] as const, `${field}.kind`);
   if (kind !== renderer) {
     fail(`${field}.kind "${kind}" does not match the planned renderer "${renderer}"`);
+  }
+  if (kind === 'parallax-2p5d') {
+    return validatePlannedParallax(media, field);
   }
   const sourceStartFrames = integer(
     media.sourceStartFrames,
@@ -447,9 +747,9 @@ const validateRendererDirective = (
   if (!context.rendererKinds.has(renderer)) {
     fail(`${field}.renderer references unregistered renderer ${renderer}`);
   }
-  const isMediaRenderer = renderer === 'video' || renderer === 'hybrid';
+  const isMediaRenderer = renderer === 'video' || renderer === 'hybrid' || renderer === 'parallax-2p5d';
   if (!isMediaRenderer && directive.media !== undefined && directive.media !== null) {
-    fail(`${field}.media is only valid for the video and hybrid renderer directives`);
+    fail(`${field}.media is only valid for the video, hybrid and parallax-2p5d renderer directives`);
   }
   const media = isMediaRenderer ? validatePlannedMedia(directive.media, renderer, field) : null;
   if (isMediaRenderer && media === null) {

@@ -146,12 +146,30 @@ const resolveTiming = (input: DirectorPlanInput): Timing => {
   );
 };
 
-const cloneMedia = (media: PlannedShotMedia): PlannedShotMedia =>
-  media.kind === 'video'
-    ? {...media}
-    : {...media, overlay: {...media.overlay}, layers: media.layers.map((layer) => ({...layer}))};
+const cloneMedia = (media: PlannedShotMedia): PlannedShotMedia => {
+  if (media.kind === 'video') return {...media};
+  if (media.kind === 'parallax-2p5d') {
+    return {
+      ...media,
+      background: {...media.background},
+      camera: {...media.camera},
+      atmosphere: {...media.atmosphere},
+      light: {...media.light},
+      layers: media.layers.map((layer) => ({
+        ...layer,
+        ...(layer.motion === undefined ? {} : {motion: {...layer.motion}}),
+      })),
+      characters: media.characters.map((character) => ({
+        ...character,
+        poses: character.poses.map((pose) => ({...pose})),
+      })),
+    };
+  }
+  return {...media, overlay: {...media.overlay}, layers: media.layers.map((layer) => ({...layer}))};
+};
 
-const isMediaRendererKind = (renderer: string): boolean => renderer === 'video' || renderer === 'hybrid';
+const isMediaRendererKind = (renderer: string): boolean =>
+  renderer === 'video' || renderer === 'hybrid' || renderer === 'parallax-2p5d';
 
 const rendererAvailable = (input: DirectorPlanInput, renderer: string): boolean =>
   DEFAULT_SCENE_REGISTRY.kinds().includes(renderer) ||
@@ -405,6 +423,89 @@ export const generateDirectorPlan = (input: DirectorPlanInput): DirectorPlan => 
     const media = shot.media;
     if (!media) continue;
     const shotLength = shot.endFrame - shot.startFrame;
+    if (media.kind === 'parallax-2p5d') {
+      const background = addRequirement(shot, {
+        kind: 'image',
+        description: `Opaque 2.5D background plate for ${shot.id}: ${shot.purpose}`,
+        visualStyle: shot.visualDescription,
+        aspectRatio: input.brief.aspectRatio,
+        durationFrames: null,
+        alphaRequired: false,
+        continuityReferences: [...shot.continuityIds],
+        provenanceRequirements: baseProvenance,
+        renderer: shot.renderer,
+        status: 'needed',
+        approval: 'draft',
+        fulfilledAssetId: null,
+        path: null,
+        sha256: null,
+        mediaSlot: media.backgroundSlot,
+        fingerprint: '',
+      });
+      background.fingerprint = requirementFingerprint(background);
+      for (const layer of media.layers) {
+        if (layer.visibleFromFrame >= layer.visibleToFrame || layer.visibleToFrame > shotLength) {
+          throw new PreproductionError(
+            `Shot ${shot.id} layer slot ${layer.slot} has an invalid shot-local visibility range`,
+          );
+        }
+        const requirement = addRequirement(shot, {
+          kind: 'layer',
+          description: `Transparent ${layer.role} layer ${layer.slot} for ${shot.id} at order ${layer.order}`,
+          visualStyle: shot.visualDescription,
+          aspectRatio: input.brief.aspectRatio,
+          durationFrames: layer.visibleToFrame - layer.visibleFromFrame,
+          alphaRequired: true,
+          continuityReferences: [...shot.continuityIds],
+          provenanceRequirements: baseProvenance,
+          renderer: shot.renderer,
+          status: 'needed',
+          approval: 'draft',
+          fulfilledAssetId: null,
+          path: null,
+          sha256: null,
+          mediaSlot: layer.slot,
+          fingerprint: '',
+        });
+        requirement.fingerprint = requirementFingerprint(requirement);
+      }
+      for (const character of media.characters) {
+        let cursor = 0;
+        for (const pose of character.poses) {
+          if (pose.fromFrame !== cursor || pose.toFrame > shotLength) {
+            throw new PreproductionError(
+              `Shot ${shot.id} character ${character.characterId} poses must tile the shot in order`,
+            );
+          }
+          cursor = pose.toFrame;
+          const requirement = addRequirement(shot, {
+            kind: 'layer',
+            description: `Character ${character.characterId} pose ${pose.slot} for ${shot.id}`,
+            visualStyle: shot.visualDescription,
+            aspectRatio: input.brief.aspectRatio,
+            durationFrames: pose.toFrame - pose.fromFrame,
+            alphaRequired: true,
+            continuityReferences: [...shot.continuityIds],
+            provenanceRequirements: baseProvenance,
+            renderer: shot.renderer,
+            status: 'needed',
+            approval: 'draft',
+            fulfilledAssetId: null,
+            path: null,
+            sha256: null,
+            mediaSlot: pose.slot,
+            fingerprint: '',
+          });
+          requirement.fingerprint = requirementFingerprint(requirement);
+        }
+        if (cursor !== shotLength) {
+          throw new PreproductionError(
+            `Shot ${shot.id} character ${character.characterId} poses end at ${cursor} but the shot lasts ${shotLength}`,
+          );
+        }
+      }
+      continue;
+    }
     if (media.sourceStartFrames + shotLength > Number.MAX_SAFE_INTEGER) {
       throw new PreproductionError(`Shot ${shot.id} requests an out-of-range video in-point`);
     }

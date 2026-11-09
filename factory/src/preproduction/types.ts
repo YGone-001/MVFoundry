@@ -1,5 +1,8 @@
 import type {
+  AtmosphereConfig,
+  CameraMoveConfig,
   HybridOverlayKind,
+  LightVariationConfig,
   MediaFit,
   ProjectAssetKind,
   SceneParams,
@@ -239,7 +242,92 @@ export type PlannedHybridOverlay = {
 
 export type PlannedShotMedia =
   | (PlannedMediaBase & {kind: 'video'})
-  | (PlannedMediaBase & {kind: 'hybrid'; layers: PlannedHybridLayer[]; overlay: PlannedHybridOverlay});
+  | (PlannedMediaBase & {kind: 'hybrid'; layers: PlannedHybridLayer[]; overlay: PlannedHybridOverlay})
+  | PlannedParallaxMedia;
+
+/* -------------------------------------------------------------------------- */
+/* Planned 2.5D shot                                                           */
+/* -------------------------------------------------------------------------- */
+
+export type PlannedParallaxRole = 'midground' | 'subject' | 'foreground';
+
+export type PlannedLayerMotion = {
+  translateXFrom: number;
+  translateXTo: number;
+  translateYFrom: number;
+  translateYTo: number;
+  fromFrame?: number;
+  toFrame?: number;
+  easing: 'linear' | 'easeInOut';
+};
+
+/** One static depth layer. `slot` is the requirement this plate must satisfy. */
+export type PlannedParallaxLayer = {
+  slot: string;
+  role: PlannedParallaxRole;
+  order: number;
+  parallax: number;
+  opacity: number;
+  fit: MediaFit;
+  positionX: number;
+  positionY: number;
+  scale: number;
+  blur?: number;
+  visibleFromFrame: number;
+  visibleToFrame: number;
+  motion?: PlannedLayerMotion;
+};
+
+/** One authored pose state. Each pose names its own requirement slot. */
+export type PlannedParallaxPose = {
+  slot: string;
+  fromFrame: number;
+  toFrame: number;
+  transition: 'cut' | 'crossfade';
+  fadeFrames: number;
+  offsetX: number;
+  offsetY: number;
+  scale: number;
+  opacity: number;
+};
+
+export type PlannedParallaxCharacter = {
+  characterId: string;
+  order: number;
+  parallax: number;
+  anchorX: number;
+  anchorY: number;
+  pivotX: number;
+  pivotY: number;
+  height: number;
+  breathe?: {amplitude: number; periodFrames: number};
+  sway?: {amplitude: number; periodFrames: number};
+  poses: PlannedParallaxPose[];
+};
+
+/**
+ * A planned asset-backed 2.5D shot. It is intent, not configuration: every slot
+ * must be fulfilled by an approved local asset before the compiler emits real
+ * `ShotParallaxMedia`, and the shot-local frame bounds are re-checked then.
+ */
+export type PlannedParallaxMedia = {
+  kind: 'parallax-2p5d';
+  backgroundSlot: string;
+  background: {
+    parallax: number;
+    opacity: number;
+    fit: MediaFit;
+    positionX: number;
+    positionY: number;
+    scale: number;
+    blur?: number;
+  };
+  camera: CameraMoveConfig;
+  atmosphere: AtmosphereConfig;
+  light: LightVariationConfig;
+  layers: PlannedParallaxLayer[];
+  characters: PlannedParallaxCharacter[];
+};
 
 export type CreativeBriefRendererDirective = {
   id: string;

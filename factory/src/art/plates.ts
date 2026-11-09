@@ -23,6 +23,7 @@ import {
   drawAnimeTram,
   drawAnimeWoman,
 } from './animePlates';
+import {CHARACTER_PLATES} from './characterPlates';
 
 export type ArtPlateSpec = {
   name: string;
@@ -182,6 +183,7 @@ export const ART_PLATES: readonly ArtPlateSpec[] = Object.freeze([
     note: 'Graphic tram with motion lines and a comic headlight starburst',
     draw: drawAnimeTram,
   },
+  ...CHARACTER_PLATES,
 ]);
 
 export const ART_PLATE_DRAWERS: Readonly<Record<string, ArtPlateSpec['draw']>> = Object.freeze(

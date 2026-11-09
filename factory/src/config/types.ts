@@ -200,6 +200,59 @@ export type ParallaxLayerConfig = {
   motion?: LayerMotionConfig;
 };
 
+/**
+ * One authored pose state of an approved character. Poses tile the shot-local
+ * clock exactly, so a character can never freeze on a stale drawing or show two
+ * contradictory poses at the same frame.
+ */
+export type ParallaxPoseKeyframe = {
+  /** Approved `layer` asset holding one full-body or bust pose. */
+  assetId: string;
+  /** Inclusive shot-local start frame. */
+  fromFrame: number;
+  /** Exclusive shot-local end frame. */
+  toFrame: number;
+  /** `cut` swaps on a single frame; `crossfade` blends over `fadeFrames`. */
+  transition: 'cut' | 'crossfade';
+  /** 0 for a cut, 2-12 output frames for a crossfade. */
+  fadeFrames: number;
+  /** Blocking offset as a fraction of output frame width/height. */
+  offsetX: number;
+  offsetY: number;
+  scale: number;
+  opacity: number;
+};
+
+/** Frame-derived idle motion. It never feeds the camera path. */
+export type ParallaxCharacterIdleConfig = {
+  amplitude: number;
+  periodFrames: number;
+};
+
+/**
+ * An approved character performing inside a 2.5D shot. The pose sequence is the
+ * performance; `breathe` and `sway` are idle life, not acting. Both are sampled
+ * from the integer output frame, so the same frame always renders identically.
+ */
+export type ParallaxCharacterConfig = {
+  characterId: string;
+  role: 'subject';
+  /** Draw order shared with `layers`; larger draws nearer the camera. */
+  order: number;
+  parallax: number;
+  /** Normalized screen position of the character's pivot point. */
+  anchorX: number;
+  anchorY: number;
+  /** Normalized pivot inside the pose artwork (feet for full body, neck for bust). */
+  pivotX: number;
+  pivotY: number;
+  /** Rendered artwork height as a fraction of output frame height. */
+  height: number;
+  breathe?: ParallaxCharacterIdleConfig;
+  sway?: ParallaxCharacterIdleConfig;
+  poses: ParallaxPoseKeyframe[];
+};
+
 export type ParallaxImageBackground = {
   kind: 'image';
   assetId: string;
@@ -302,6 +355,8 @@ export type ShotParallaxMedia = {
   kind: 'parallax-2p5d';
   background: ParallaxBackgroundConfig;
   layers: ParallaxLayerConfig[];
+  /** Optional authored character performance; absent keeps the legacy shot. */
+  characters?: ParallaxCharacterConfig[];
   camera: CameraMoveConfig;
   atmosphere: AtmosphereConfig;
   light: LightVariationConfig;

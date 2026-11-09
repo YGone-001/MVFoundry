@@ -20,6 +20,14 @@ const cloneMedia = (media: ShotMediaConfig | undefined): ShotMediaConfig | undef
           : {...layer},
       ),
       camera: {...media.camera},
+      ...(media.characters
+        ? {characters: media.characters.map((character) => ({
+            ...character,
+            ...(character.breathe ? {breathe: {...character.breathe}} : {}),
+            ...(character.sway ? {sway: {...character.sway}} : {}),
+            poses: character.poses.map((pose) => ({...pose})),
+          }))}
+        : {}),
       atmosphere: {...media.atmosphere},
       light: media.light.sweep
         ? {...media.light, sweep: {...media.light.sweep}}

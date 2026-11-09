@@ -31,8 +31,8 @@ if (!workspaceRoot || !projectId) {
   console.error('--workspace and --project are required');
   process.exit(2);
 }
-if (!['cinematic', 'anime', 'all'].includes(set)) {
-  console.error('--set must be cinematic, anime or all');
+if (!['cinematic', 'anime', 'actor', 'all'].includes(set)) {
+  console.error('--set must be cinematic, anime, actor or all');
   process.exit(2);
 }
 

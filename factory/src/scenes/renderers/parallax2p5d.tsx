@@ -14,6 +14,7 @@ import type {
   ComicTreatmentConfig,
   GradeConfig,
   ParallaxBackgroundConfig,
+  ParallaxCharacterConfig,
   ParallaxLayerConfig,
   ShotParallaxMedia,
 } from '../../config/types';
@@ -22,11 +23,14 @@ import {resolveVideoSource, shotSequenceDuration} from './mediaShared';
 import {
   NEUTRAL_GRADE,
   hashNoise,
+  mergeDrawOrder,
   quantizeMotionFrame,
+  resolveCharacterDepthTransform,
   resolveComic,
   resolveGrade,
   resolveLayerDepthTransform,
   sampleCamera,
+  sampleCharacterPerformance,
 } from '../parallaxMath';
 
 type DepthCard = {
@@ -48,6 +52,9 @@ type ParallaxPlan = {
     card: DepthCard;
   };
   layers: Array<ParallaxLayerConfig & {src: string}>;
+  characters: ParallaxCharacterConfig[];
+  /** Public URL for every approved asset this shot draws (layers and poses). */
+  assetSrc: Record<string, string>;
   camera: ShotParallaxMedia['camera'];
   grade: GradeConfig;
   comic: ComicTreatmentConfig;
@@ -302,6 +309,65 @@ const ParallaxOverlay: React.FC<{plan: ParallaxPlan}> = ({plan}) => {
   );
 };
 
+/**
+ * Draws one approved character pose track. The pivot of the artwork is pinned to
+ * the authored anchor, so swapping a pose never makes the subject jump. Pose
+ * selection uses the raw shot-local output frame: a cut lands on exactly that
+ * frame and a crossfade blends only the poses it names.
+ */
+const CharacterPose: React.FC<{
+  character: ParallaxCharacterConfig;
+  plan: ParallaxPlan;
+  localFrame: number;
+  motionFrame: number;
+}> = ({character, plan, localFrame, motionFrame}) => {
+  const performance = sampleCharacterPerformance(character, localFrame);
+  const shaft = sampleCamera(plan.camera, motionFrame, plan.durationInFrames);
+  const depth = resolveCharacterDepthTransform(character, shaft);
+  const baseHeight = character.height * plan.height;
+  const anchorLeft = (character.anchorX + depth.translateX + performance.idleX) * plan.width;
+  const anchorTop = (character.anchorY + depth.translateY + performance.idleY) * plan.height;
+  return (
+    <>
+      {performance.poses.map((pose, index) => {
+        const src = plan.assetSrc[pose.assetId];
+        if (!src) {
+          throw new SceneRenderError(
+            `Character ${character.characterId} pose asset ${pose.assetId} is not staged for rendering`,
+          );
+        }
+        const left = anchorLeft + pose.offsetX * plan.width;
+        const top = anchorTop + pose.offsetY * plan.height;
+        const scale = pose.scale * depth.zoom * performance.idleScale;
+        return (
+          <div
+            key={`${character.characterId}-${pose.assetId}-${index}`}
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              transform: `translate(${left}px, ${top}px) scale(${scale})`,
+              transformOrigin: '0 0',
+              opacity: pose.opacity,
+              willChange: 'transform, opacity',
+            }}
+          >
+            <Img
+              src={src}
+              style={{
+                display: 'block',
+                height: baseHeight,
+                width: 'auto',
+                transform: `translate(${-character.pivotX * 100}%, ${-character.pivotY * 100}%)`,
+              }}
+            />
+          </div>
+        );
+      })}
+    </>
+  );
+};
+
 const ParallaxInner: React.FC<{plan: ParallaxPlan}> = ({plan}) => {
   const localFrame = useCurrentFrame();
   const motionFrame = quantizeMotionFrame(localFrame, plan.fps, plan.comic.motionStepFps);
@@ -345,14 +411,26 @@ const ParallaxInner: React.FC<{plan: ParallaxPlan}> = ({plan}) => {
         ) : (
           <Img src={plan.background.src} style={backgroundStyle} />
         )}
-        {plan.layers
-          .filter(
-            (layer) => localFrame >= layer.visibleFromFrame && localFrame < layer.visibleToFrame,
-          )
-          .map((layer) => (
+        {mergeDrawOrder(plan.layers, plan.characters).map((entry) => {
+          if (entry.kind === 'character') {
+            return (
+              <CharacterPose
+                key={`character-${entry.character.characterId}`}
+                character={entry.character}
+                plan={plan}
+                localFrame={localFrame}
+                motionFrame={motionFrame}
+              />
+            );
+          }
+          const layer = entry.layer;
+          if (localFrame < layer.visibleFromFrame || localFrame >= layer.visibleToFrame) {
+            return null;
+          }
+          return (
             <Img
-              key={layer.order}
-              src={layer.src}
+              key={`layer-${layer.order}`}
+              src={plan.assetSrc[layer.assetId]}
               style={{
                 position: 'absolute',
                 inset: 0,
@@ -366,7 +444,8 @@ const ParallaxInner: React.FC<{plan: ParallaxPlan}> = ({plan}) => {
                 filter: layer.blur && layer.blur > 0 ? `blur(${layer.blur}px)` : undefined,
               }}
             />
-          ))}
+          );
+        })}
       </AbsoluteFill>
       <ParallaxOverlay plan={plan} />
     </AbsoluteFill>
@@ -427,6 +506,23 @@ const ParallaxScene: React.FC<MediaSceneRendererProps> = ({project, shot, public
     return {...layer, src: staticFile(publicPath)};
   });
 
+  const assetSrc: Record<string, string> = {};
+  for (const layer of media.layers) {
+    assetSrc[layer.assetId] = staticFile(publicAssets[layer.assetId]);
+  }
+  const characters = media.characters ?? [];
+  for (const character of characters) {
+    for (const pose of character.poses) {
+      const publicPath = publicAssets[pose.assetId];
+      if (!publicPath) {
+        throw new SceneRenderError(
+          `Character ${character.characterId} pose ${pose.assetId} for shot ${shot.id} is not staged for rendering`,
+        );
+      }
+      assetSrc[pose.assetId] = staticFile(publicPath);
+    }
+  }
+
   const profile = project.visual.style ? getStyleProfile(project.visual.style.id) : undefined;
   const grade = profile ? resolveGrade(profile, media.grade) : {...NEUTRAL_GRADE, ...media.grade};
   const plan: ParallaxPlan = {
@@ -445,6 +541,8 @@ const ParallaxScene: React.FC<MediaSceneRendererProps> = ({project, shot, public
       },
     },
     layers: layerSources,
+    characters,
+    assetSrc,
     camera: media.camera,
     grade,
     comic: resolveComic(media.comic),

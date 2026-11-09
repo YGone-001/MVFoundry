@@ -45,6 +45,7 @@
     "style:art": "npm run build && node factory/scripts/generate-art-plates.mjs",
     "style:prototype:seed": "npm run build && node factory/scripts/seed-style-prototype.mjs",
     "style:review": "node factory/scripts/build-style-review-package.mjs",
+    "style:prototype:seed-c": "npm run build && node factory/scripts/seed-style-prototype-c.mjs",
     "verify:modules": "npm run build && node factory/scripts/verify-module-render.mjs",
     "audit:git": "npm run build && node factory/scripts/audit-git.mjs",
     "audit:publication": "node security/audit-publication.mjs",

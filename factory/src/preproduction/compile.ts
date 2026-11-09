@@ -1,11 +1,14 @@
 import {existsSync} from 'node:fs';
 import type {
   LoadedProject,
+  ParallaxCharacterConfig,
+  ParallaxLayerConfig,
   ProjectAsset,
   ProjectConfig,
   Shot,
   ShotHybridMedia,
   ShotMediaConfig,
+  ShotParallaxMedia,
   ShotVideoMedia,
   VideoSourceConfig,
 } from '../config/types';
@@ -29,7 +32,8 @@ import type {
 import {PREPRODUCTION_PATHS, writeProjectJson} from './store';
 import {validateStoryboard} from './storyboard';
 
-const isMediaRendererName = (renderer: string): boolean => renderer === 'video' || renderer === 'hybrid';
+const isMediaRendererName = (renderer: string): boolean =>
+  renderer === 'video' || renderer === 'hybrid' || renderer === 'parallax-2p5d';
 
 const intakeRecordFor = (intake: AssetIntakeDocument | null, requirementId: string) =>
   intake?.records.find((record) => record.requirementId === requirementId) ?? null;
@@ -183,6 +187,117 @@ const buildShotMediaConfig = (
     if (!requirement || requirement.mediaSlot === null) continue;
     slotOwners.set(requirement.mediaSlot, requirement);
   }
+  const bindSlot = (slot: string, label: string): ProjectAsset => {
+    const requirement = slotOwners.get(slot);
+    if (!requirement) {
+      throw new PreproductionError(`Shot ${shot.id} plans ${label} slot ${slot} with no bound requirement`);
+    }
+    const asset = resolveBoundAsset(project, requirement, intake);
+    if (!asset) {
+      throw new PreproductionError(
+        `Shot ${shot.id} ${label} slot ${slot} is not fulfilled by an approved local asset`,
+      );
+    }
+    return asset;
+  };
+
+  if (media.kind === 'parallax-2p5d') {
+    if (shot.renderer !== 'parallax-2p5d') {
+      throw new PreproductionError(
+        `Shot ${shot.id} plans parallax media on renderer ${shot.renderer}`,
+      );
+    }
+    const backgroundAsset = bindSlot(media.backgroundSlot, 'background');
+    if (backgroundAsset.kind !== 'image') {
+      throw new PreproductionError(
+        `Shot ${shot.id} background slot ${media.backgroundSlot} is bound to a ${backgroundAsset.kind} asset; an approved opaque PNG plate is required`,
+      );
+    }
+    const layers: ParallaxLayerConfig[] = media.layers.map((layer) => {
+      const asset = bindSlot(layer.slot, 'layer');
+      if (asset.kind !== 'layer') {
+        throw new PreproductionError(
+          `Shot ${shot.id} layer slot ${layer.slot} is bound to a ${asset.kind} asset; a transparent PNG layer is required`,
+        );
+      }
+      return {
+        assetId: asset.id,
+        role: layer.role,
+        order: layer.order,
+        parallax: layer.parallax,
+        opacity: layer.opacity,
+        fit: layer.fit,
+        positionX: layer.positionX,
+        positionY: layer.positionY,
+        scale: layer.scale,
+        ...(layer.blur === undefined ? {} : {blur: layer.blur}),
+        visibleFromFrame: layer.visibleFromFrame,
+        visibleToFrame: layer.visibleToFrame,
+        ...(layer.motion === undefined
+          ? {}
+          : {
+              motion: {
+                ...layer.motion,
+              },
+            }),
+      };
+    });
+    const characters: ParallaxCharacterConfig[] = media.characters.map((character) => {
+      const poses = character.poses.map((pose) => {
+        const asset = bindSlot(pose.slot, 'pose');
+        if (asset.kind !== 'layer') {
+          throw new PreproductionError(
+            `Shot ${shot.id} character ${character.characterId} pose slot ${pose.slot} is bound to a ${asset.kind} asset; a transparent pose PNG is required`,
+          );
+        }
+        return {
+          assetId: asset.id,
+          fromFrame: pose.fromFrame,
+          toFrame: pose.toFrame,
+          transition: pose.transition,
+          fadeFrames: pose.fadeFrames,
+          offsetX: pose.offsetX,
+          offsetY: pose.offsetY,
+          scale: pose.scale,
+          opacity: pose.opacity,
+        };
+      });
+      return {
+        characterId: character.characterId,
+        role: 'subject' as const,
+        order: character.order,
+        parallax: character.parallax,
+        anchorX: character.anchorX,
+        anchorY: character.anchorY,
+        pivotX: character.pivotX,
+        pivotY: character.pivotY,
+        height: character.height,
+        ...(character.breathe === undefined ? {} : {breathe: character.breathe}),
+        ...(character.sway === undefined ? {} : {sway: character.sway}),
+        poses,
+      };
+    });
+    return {
+      kind: 'parallax-2p5d',
+      background: {
+        kind: 'image',
+        assetId: backgroundAsset.id,
+        opacity: media.background.opacity,
+        fit: media.background.fit,
+        positionX: media.background.positionX,
+        positionY: media.background.positionY,
+        scale: media.background.scale,
+        parallax: media.background.parallax,
+        ...(media.background.blur === undefined ? {} : {blur: media.background.blur}),
+      },
+      layers,
+      ...(characters.length === 0 ? {} : {characters}),
+      camera: media.camera,
+      atmosphere: media.atmosphere,
+      light: media.light,
+    } satisfies ShotParallaxMedia;
+  }
+
   const backgroundRequirement = slotOwners.get(media.backgroundSlot);
   if (!backgroundRequirement) {
     throw new PreproductionError(

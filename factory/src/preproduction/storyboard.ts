@@ -70,7 +70,8 @@ const TIMING_SOURCES = [
 ] as const;
 const APPROVALS = ['draft', 'proposed', 'approved', 'rejected'] as const;
 
-const isMediaRendererName = (renderer: string): boolean => renderer === 'video' || renderer === 'hybrid';
+const isMediaRendererName = (renderer: string): boolean =>
+  renderer === 'video' || renderer === 'hybrid' || renderer === 'parallax-2p5d';
 
 /**
  * A planned shot keeps its media intent so the compiler can bind an approved
@@ -85,7 +86,9 @@ const validatePlannedShotMedia = (
 ): PlannedShotMedia | null => {
   if (!isMediaRendererName(renderer)) {
     if (value !== undefined && value !== null) {
-      throw new PreproductionError(`${field}.media is only valid for video and hybrid shots`);
+      throw new PreproductionError(
+        `${field}.media is only valid for video, hybrid and parallax-2p5d shots`,
+      );
     }
     return null;
   }
@@ -98,6 +101,41 @@ const validatePlannedShotMedia = (
       if (layer.visibleToFrame > shotLength) {
         throw new PreproductionError(
           `${field}.media layer ${layer.slot} is visible to frame ${layer.visibleToFrame}, beyond the shot length ${shotLength}`,
+        );
+      }
+    }
+  }
+  if (media && media.kind === 'parallax-2p5d') {
+    for (const layer of media.layers) {
+      if (layer.visibleToFrame > shotLength) {
+        throw new PreproductionError(
+          `${field}.media layer ${layer.slot} is visible to frame ${layer.visibleToFrame}, beyond the shot length ${shotLength}`,
+        );
+      }
+    }
+    for (const character of media.characters) {
+      let cursor = 0;
+      for (const pose of character.poses) {
+        if (pose.fromFrame !== cursor) {
+          throw new PreproductionError(
+            `${field}.media character ${character.characterId} pose ${pose.slot} starts at ${pose.fromFrame} but the previous pose ended at ${cursor}`,
+          );
+        }
+        if (pose.toFrame > shotLength) {
+          throw new PreproductionError(
+            `${field}.media character ${character.characterId} pose ${pose.slot} ends at ${pose.toFrame}, beyond the shot length ${shotLength}`,
+          );
+        }
+        if (pose.fadeFrames >= pose.toFrame - pose.fromFrame) {
+          throw new PreproductionError(
+            `${field}.media character ${character.characterId} pose ${pose.slot} fades longer than the pose itself`,
+          );
+        }
+        cursor = pose.toFrame;
+      }
+      if (cursor !== shotLength) {
+        throw new PreproductionError(
+          `${field}.media character ${character.characterId} poses end at ${cursor} but the shot lasts ${shotLength} frames`,
         );
       }
     }
@@ -390,6 +428,14 @@ const assertMediaSlots = (shot: PlanShot, requirements: readonly AssetRequiremen
   const slots = [
     shot.media.backgroundSlot,
     ...(shot.media.kind === 'hybrid' ? shot.media.layers.map((layer) => layer.slot) : []),
+    ...(shot.media.kind === 'parallax-2p5d'
+      ? [
+          ...shot.media.layers.map((layer) => layer.slot),
+          ...shot.media.characters.flatMap((character) =>
+            character.poses.map((pose) => pose.slot),
+          ),
+        ]
+      : []),
   ];
   for (const slot of slots) {
     const matches = requirements.filter(

@@ -231,6 +231,18 @@ The generated entry calls `bindProjectSceneModules`, which validates the exporte
 - Background plates are PNG-probed (`probeImagePng`) only for projects that use this route; layers already require an alpha-capable PNG. Sources remain manifest-declared, hash-verified, staged through the write boundary and rejected on traversal, links or escapes.
 - The integer frame clock and the project audio mix remain the only timeline and audio authorities. The compositor never retimes media and never introduces audio.
 
+### Character performance
+
+`factory/src/scenes/parallaxMath.ts` samples an authored pose track; `factory/src/scenes/renderers/parallax2p5d.tsx` composites it.
+
+- `media.characters[]` declares a stable character id, a shared draw `order`, depth, a normalized anchor and artwork pivot, a rendered height, optional frame-derived idle motion and a `poses[]` track. Static layers and characters are merged by `order`, so occlusion between them is explicit rather than dependent on array position.
+- `sampleCharacterPerformance` is a pure function of the shot-local integer output frame. A `cut` resolves on exactly one frame; a `crossfade` blends the outgoing and incoming pose over 2–12 frames. A frame outside every pose range throws instead of freezing the last drawing.
+- The pivot is pinned to the anchor, so replacing one pose with another never makes the subject jump. Pose selection never reads the camera path, which keeps `SUBJECT_PERFORMANCE` separable from `CAMERA_MOTION` in evidence.
+- Idle `breathe`/`sway` are frame-derived multipliers. They are life, not acting, and they never move the camera.
+- `toRenderProject` preserves `media.characters`; a snapshot that drops it would remove the performance while the config still validates. The unit suite covers that projection.
+- Planned 2.5D shots reuse the same media vocabulary through `PlannedParallaxMedia` (background slot, layer slots, pose slots, depth roles, camera, atmosphere, light), and `buildShotMediaConfig` binds only approved assets and emits real `ShotParallaxMedia`. Planned light refuses a `sweep`, which stays a direct `project.json` authoring capability.
+- The route is pose-based cutout performance. It is not skeletal animation, not photoreal character art and not volumetric 3D; the artwork quality ceiling is disclosed rather than papered over.
+
 ### Trust boundary
 
 - The hash proves byte identity, not benign behavior. Importing the verified module executes its top-level code in the browser when the bundle loads; runtime identity checks happen after import.
@@ -257,7 +269,7 @@ The generated entry calls `bindProjectSceneModules`, which validates the exporte
 
 The operator layer (`factory/scripts/mv-workflow.mjs` and `support/workflow-*.mjs`) composes the existing preproduction validators/compiler, normal loader and range renderer. Draft changes use existing revision paths; content-bound preview/review evidence stays external. Technical promotion and human artistic acceptance are separate. See [operator workflow](docs/operator-workflow.md). Both original full-project verifiers remain mandatory alongside decoded workflow acceptance.
 
-- Preproduction planning and storyboard compilation accept Canvas, video and hybrid media only. `parallax-2p5d` shots are authored directly in `project.json`; storyboard-driven generation of them is not implemented.
+- Preproduction planning and storyboard compilation accept Canvas, video, hybrid and `parallax-2p5d` media. Planned 2.5D shots declare a plate slot, layer slots and pose slots and compile only against approved assets; `light.sweep` and other direct authoring remain `project.json`-only.
 - The 2.5D route is layered cardboard parallax with authored blur, not volumetric 3D. Depth ordering, per-role parallax ranges and a minimum depth span are validated, but occlusion between cutouts is only what the supplied alpha art provides.
 
 - Video/Hybrid support approved local MP4/H.264 constant-frame-rate, zero-rotation sources only. VFR and rotated sources require preprocessing.
