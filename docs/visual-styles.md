@@ -38,6 +38,25 @@ Registration is not shipped artwork. This table states what actually exists in t
 
 The gallery module (`factory/scripts/support/style-gallery-module.ts`) is a synthetic contract proof: one self-contained Canvas module draws six structurally different languages. It is not production art, and rendering it is not an artistic approval.
 
+## Project scaffolding
+
+A style-driven project still needs a project-local Canvas module. `mv-project init --style-id <id>` writes an **unregistered** scaffold at `scenes/style-gallery.ts` and reports its SHA256; it does not touch `sceneModules` or `visual.style`.
+
+`mv-project attach-style --approve-module` is the explicit review step:
+
+```bash
+node factory/scripts/mv-project.mjs init --project my-project --workspace <external-root> \
+  --width 640 --height 360 --fps 24 --audio <file> --source "<source>" --rights "<rights>" \
+  --style-id cinematic-illustration-2p5d
+
+node factory/scripts/mv-project.mjs attach-style --project my-project --workspace <external-root> \
+  --style-id cinematic-illustration-2p5d --module scenes/style-gallery.ts --approve-module
+```
+
+The attach step requires `--approve-module`, a project-relative module path under `scenes/`, an empty timeline, and no existing `visual.style`. It verifies containment, rejects links and traversal, enforces the 1–512 KiB limit and the static source policy, records the SHA256, then writes the manifest entry with `trust: "user-authored-approved"`. The bundle bind still validates the module's exported `supportedStyles` at render time.
+
+Neither command approves an asset, plan or storyboard. A recorded module approval is an operational decision, not an artistic verdict.
+
 ## Themes
 
 `factory/src/style/themes.ts` defines optional themes that own shared roles (`bg`, `ink`, `accent`, `paper`, `flash`, and so on). A theme can change the ground and accent of a title card, HUD or editorial layout. It cannot turn one style into another.

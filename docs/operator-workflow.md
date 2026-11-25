@@ -59,7 +59,12 @@ A new project is created without a render timeline, so analysis and planning do 
 
 ```sh
 node factory/scripts/mv-project.mjs init --project my-project --workspace <external-root> \
-  --width 1920 --height 1080 --fps 30 --audio <file> --metadata-file <utf8.json>
+  --width 1920 --height 1080 --fps 30 --audio <file> --metadata-file <utf8.json> \
+  --style-id cinematic-illustration-2p5d
+
+# The scaffold is written but not registered. Approve it explicitly:
+node factory/scripts/mv-project.mjs attach-style --project my-project --workspace <external-root> \
+  --style-id cinematic-illustration-2p5d --module scenes/style-gallery.ts --approve-module
 
 npm run preproduction -- analyze-beats --project my-project
 npm run preproduction -- validate --project my-project
@@ -72,4 +77,4 @@ npm run preproduction -- attach-asset --project my-project --requirement REQ-001
 npm run preproduction -- review-asset --project my-project --requirement REQ-001 --decision approve --notes "<review>"
 ```
 
-`--metadata-file` is a JSON document with any of `title`, `artist`, `source`, `rights` and `styleProfile`. It is decoded as strict UTF-8, unknown keys are refused, and a field supplied twice with different values is refused; identical duplicates are accepted. Use it whenever the parent shell cannot be trusted with non-ASCII text. `onboarding:seed` and `onboarding:verify` reproduce this whole path against synthetic media, including the browser refusal, the low-wash revision and a decoded 900-frame MP4.
+`--metadata-file` is a JSON document with any of `title`, `artist`, `source`, `rights` and `styleProfile`. It is decoded as strict UTF-8, unknown keys are refused, and a field supplied twice with different values is refused; identical duplicates are accepted. Use it whenever the parent shell cannot be trusted with non-ASCII text. `--style-id` writes an unregistered module scaffold; `attach-style --approve-module` is the explicit review that registers it, refuses a non-empty timeline, verifies the module path and SHA256, and applies the static source policy before writing `project.json`. `onboarding:seed` and `onboarding:verify` reproduce this whole path against synthetic media, including the browser refusal, the low-wash revision and a decoded 900-frame MP4.

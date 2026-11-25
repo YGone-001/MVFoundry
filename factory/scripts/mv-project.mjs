@@ -52,6 +52,7 @@ if (!command || command === '--help' || command === 'help') {
 
 Commands:
   init          create a new project in an authorized external workspace
+  attach-style  attach a reviewed project module as the selected visual style
   import-audio  import or explicitly replace the master audio source
 
 init:
@@ -63,11 +64,21 @@ init:
   --source "<text>"       declared provenance of the audio file
   --rights "<text>"       declared rights statement for the audio file
   --title "<text>" --artist "<text>"   optional song metadata
+  --style-id <id>         optional registered visual style; writes an
+                          UNREGISTERED scaffold at scenes/style-gallery.ts
   --metadata-file <path>  explicit UTF-8 JSON document with title, artist,
                           source, rights and/or styleProfile; identical values
                           may also be passed on the command line, differing
                           values are refused
   --force                 allow init when only an empty project dir exists
+
+attach-style:
+  --project <id> --workspace <root>
+  --style-id <id>         registered visual style to select
+  --module <path>         project-relative .ts/.tsx module under scenes/
+  --approve-module        explicit approval of the exact module source
+  --module-id <id>        manifest module id (default style-gallery)
+  --note "<text>"         optional reviewer note recorded in visual.style
 
 import-audio:
   --project <id> --workspace <root>
@@ -80,7 +91,7 @@ provider.`);
   process.exit(0);
 }
 
-if (!['init', 'import-audio'].includes(command)) {
+if (!['init', 'import-audio', 'attach-style'].includes(command)) {
   fail(`unknown command ${command}`);
 }
 
@@ -98,6 +109,17 @@ const workspaceRoot = arg('workspace', process.env.MV_WORKSPACE_ROOT);
 if (!workspaceRoot) fail('MV_WORKSPACE_ROOT or --workspace is required');
 
 const {createWriteBoundary, ensureSafeDirectory, assertSafePath} = require('../dist/src/workspace/writeBoundary.js');
+const {resolveProjectDir} = require('../dist/src/workspace/guard.js');
+const {validateProjectConfig} = require('../dist/src/config/validate.js');
+const {assertProjectSceneModuleSource} = require('../dist/src/project/sceneModules.js');
+const {assertRegisteredStyle} = require('../dist/src/style/catalog.js');
+const {
+  STYLE_SCAFFOLD_MODULE_ID,
+  STYLE_SCAFFOLD_RELATIVE_PATH,
+  applyStyleAttachment,
+  assertStyleModulePath,
+  styleScaffoldHeader,
+} = require('../dist/src/style/scaffold.js');
 const {probeAudio} = require('../dist/src/media/audioProbe.js');
 const {sha256File} = require('../dist/src/media/hash.js');
 const {parseProjectMetadataFile, mergeProjectMetadata} = require('../dist/src/project/metadata.js');
@@ -268,6 +290,15 @@ if (command === 'init') {
     fail('--fps must be an integer between 1 and 120', 'invalid-output-profile');
   }
 
+  const styleId = arg('style-id');
+  if (styleId) {
+    try {
+      assertRegisteredStyle(styleId);
+    } catch (error) {
+      fail(error.message, 'unknown-style');
+    }
+  }
+
   if (existsSync(projectFile)) {
     fail(`project ${projectId} already exists at ${projectFile}; refusing to overwrite project.json`, 'project-collision');
   }
@@ -279,13 +310,14 @@ if (command === 'init') {
   }
 
   // Create the project skeleton first, then enforce the write boundary.
-  for (const dir of ['source/audio', 'assets', 'preproduction', 'renders', 'reports', 'cache']) {
+  for (const dir of ['source/audio', 'assets', 'preproduction', 'scenes', 'renders', 'reports', 'cache']) {
     mkdirSync(path.join(projectDir, dir), {recursive: true});
   }
   const boundary = createWriteBoundary({projectDir, engineRoot: repoRoot});
   ensureSafeDirectory(boundary, path.join(projectDir, 'source', 'audio'), 'project');
   ensureSafeDirectory(boundary, path.join(projectDir, 'assets'), 'project');
   ensureSafeDirectory(boundary, path.join(projectDir, 'preproduction'), 'project');
+  ensureSafeDirectory(boundary, path.join(projectDir, 'scenes'), 'project');
   ensureSafeDirectory(boundary, path.join(projectDir, 'renders'), 'project');
   ensureSafeDirectory(boundary, path.join(projectDir, 'reports'), 'project');
 
@@ -313,6 +345,29 @@ if (command === 'init') {
   const fpsRatio = fps;
   const durationInFrames = Math.max(1, Math.round(audio.decodedDurationSeconds * fpsRatio));
 
+  // A style scaffold is written but deliberately left OUT of sceneModules.
+  // Only an explicit attach-style --approve-module may register it, so a
+  // generated file can never be mistaken for a reviewed module.
+  let styleScaffold = null;
+  if (styleId) {
+    const template = readFileSync(path.join(here, 'support', 'style-gallery-module.ts'), 'utf8');
+    const source = `${styleScaffoldHeader(styleId)}\n${template}`;
+    const target = assertSafePath(boundary, path.join(projectDir, STYLE_SCAFFOLD_RELATIVE_PATH), {
+      expect: 'file',
+      subtree: 'project',
+    });
+    writeFileSync(target, source);
+    styleScaffold = {
+      styleId,
+      moduleId: STYLE_SCAFFOLD_MODULE_ID,
+      path: STYLE_SCAFFOLD_RELATIVE_PATH,
+      sha256: sha(target),
+      registered: false,
+      note: 'The scaffold is not in sceneModules until attach-style --approve-module is run.',
+      nextCommand: `node factory/scripts/mv-project.mjs attach-style --project ${projectId} --workspace <root> --style-id ${styleId} --module ${STYLE_SCAFFOLD_RELATIVE_PATH} --approve-module`,
+    };
+  }
+
   const project = {
     schemaVersion: 1,
     projectId,
@@ -332,7 +387,7 @@ if (command === 'init') {
     lyrics: {language: 'none', path: null},
     narrative: {mode: 'narrative'},
     visual: {
-      styleProfile: metadata.styleProfile ?? 'unspecified',
+      styleProfile: metadata.styleProfile ?? styleId ?? 'unspecified',
       defaultRenderer: 'layered-canvas',
       pixel: {
         internalWidth: Math.max(8, Math.round(width / 4)),
@@ -387,7 +442,158 @@ if (command === 'init') {
       rightsDeclaration: audio.rightsDeclaration,
     },
     permissions: project.permissions,
+    ...(styleScaffold ? {styleScaffold} : {}),
     note: 'No asset, plan or storyboard has been approved. Production stays blocked until every requirement is reviewed.',
+  }, null, 2));
+  process.exit(0);
+}
+
+// ---------------------------------------------------------------------------
+// attach-style
+// ---------------------------------------------------------------------------
+
+if (command === 'attach-style') {
+  const styleId = arg('style-id');
+  if (!styleId) fail('--style-id is required', 'missing-style');
+  if (!arg('module')) fail('--module is required', 'missing-module');
+  if (!hasFlag('approve-module')) {
+    fail(
+      '--approve-module is required: it is the explicit approval of the exact module source',
+      'module-not-approved',
+    );
+  }
+  try {
+    assertRegisteredStyle(styleId);
+  } catch (error) {
+    fail(error.message, 'unknown-style');
+  }
+
+  let moduleRelative;
+  try {
+    moduleRelative = assertStyleModulePath(arg('module'));
+  } catch (error) {
+    fail(error.message, 'invalid-module-path');
+  }
+  const moduleId = arg('module-id', STYLE_SCAFFOLD_MODULE_ID);
+  const note = arg('note');
+
+  let attachedProjectDir;
+  try {
+    attachedProjectDir = resolveProjectDir({
+      workspaceRoot: workspaceAbsolute,
+      projectId,
+      engineRoot: repoRoot,
+    });
+  } catch (error) {
+    fail(error.message, 'unknown-project');
+  }
+  const attachedProjectFile = path.join(attachedProjectDir, 'project.json');
+  if (!existsSync(attachedProjectFile)) fail(`missing project.json in ${attachedProjectDir}`, 'unknown-project');
+
+  let current;
+  try {
+    current = validateProjectConfig(readJson(attachedProjectFile), {allowEmptyTimeline: true});
+  } catch (error) {
+    fail(`project.json is not loadable: ${error.message}`, 'invalid-project');
+  }
+
+  // Existing sources stay immutable. Missing declared sources are a hard
+  // refusal rather than a silently unprotected file.
+  const sourcePaths = [];
+  const audioAbsolute = path.resolve(attachedProjectDir, current.audio.path);
+  if (!existsSync(audioAbsolute)) {
+    fail(`master audio does not exist: ${current.audio.path}`, 'missing-audio');
+  }
+  sourcePaths.push(audioAbsolute);
+  for (const declared of current.sceneModules) {
+    const absoluteModule = path.resolve(attachedProjectDir, declared.path);
+    if (!existsSync(absoluteModule)) {
+      fail(`declared scene module does not exist: ${declared.path}`, 'declared-scene-module-missing');
+    }
+    sourcePaths.push(absoluteModule);
+  }
+
+  let boundary;
+  try {
+    boundary = createWriteBoundary({projectDir: attachedProjectDir, engineRoot: repoRoot, sourcePaths});
+  } catch (error) {
+    fail(`cannot protect existing project sources: ${error.message}`, 'unsafe-project');
+  }
+
+  let moduleAbsolute;
+  try {
+    moduleAbsolute = assertSafePath(boundary, path.join(attachedProjectDir, moduleRelative), {
+      expect: 'file',
+      subtree: 'project',
+    });
+  } catch (error) {
+    fail(error.message, 'unsafe-module-path');
+  }
+
+  const bytes = readFileSync(moduleAbsolute);
+  if (bytes.length === 0 || bytes.length > 512 * 1024) {
+    fail(`style module must be between 1 and ${512 * 1024} bytes`, 'unsupported-module-size');
+  }
+  const sourceText = bytes.toString('utf8');
+  if (sourceText.includes('\0')) fail('style module contains NUL bytes', 'invalid-module-source');
+  try {
+    assertProjectSceneModuleSource(sourceText, moduleRelative, moduleId);
+  } catch (error) {
+    fail(`style module failed the static source policy: ${error.message}`, 'module-source-policy');
+  }
+  const moduleSha = sha(moduleAbsolute);
+
+  let next;
+  try {
+    next = applyStyleAttachment(current, {
+      styleId,
+      modulePath: moduleRelative,
+      sha256: moduleSha,
+      moduleId,
+      note,
+    });
+  } catch (error) {
+    fail(error.message, 'style-attachment-refused');
+  }
+
+  let validated;
+  try {
+    validated = validateProjectConfig(next, {allowEmptyTimeline: true});
+  } catch (error) {
+    fail(`attached style is not valid: ${error.message}`, 'invalid-attached-project');
+  }
+
+  assertSafePath(boundary, attachedProjectFile, {expect: 'file', subtree: 'project'});
+  writeJson(attachedProjectFile, validated);
+
+  const reportsDir = ensureSafeDirectory(boundary, path.join(attachedProjectDir, 'reports'), 'project');
+  writeJson(path.join(reportsDir, 'style-attachment.json'), {
+    schemaVersion: 1,
+    projectId,
+    styleId,
+    moduleId,
+    modulePath: moduleRelative,
+    sha256: moduleSha,
+    approval: 'explicit --approve-module',
+    note: note ?? null,
+    verification: {
+      sourcePolicy: 'passed',
+      hash: 'recorded-before-write',
+      bundleBind: 'not-run',
+    },
+    warning: 'A recorded approval is an operational decision, not an artistic verdict.',
+  });
+
+  console.log(JSON.stringify({
+    status: 'style-attached',
+    projectId,
+    projectDir: path.relative(workspaceAbsolute, attachedProjectDir).split(path.sep).join('/'),
+    styleId,
+    moduleId,
+    modulePath: moduleRelative,
+    sha256: moduleSha,
+    defaultRenderer: validated.visual.defaultRenderer,
+    note: 'No asset, plan or storyboard has been approved. Run preproduction planning next.',
   }, null, 2));
   process.exit(0);
 }
