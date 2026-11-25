@@ -23,6 +23,21 @@ A style is never the same thing as a backend. All six prototype styles use Canva
 
 Each profile also declares composition rules, materials, lighting, motion, camera, typography, output capabilities, limitations and quality expectations. A style is more than a palette.
 
+## Implementation coverage
+
+Registration is not shipped artwork. This table states what actually exists in this repository so a catalog entry is never mistaken for a finished visual pipeline.
+
+| Style | Catalog + validation | Dedicated art pack / prototype | `style:gallery:seed` example |
+|---|---|---|---|
+| `cinematic-illustration-2p5d` | yes | yes — cinematic art plates, 2.5D and character-performance prototypes | yes |
+| `anime-motion-comic` | yes | yes — anime art plates and motion-comic prototype | yes |
+| `retro-pixel` | yes | yes — the built-in `pixel-canvas` renderer; the gallery module is the style-bound example | yes |
+| `ink-watercolor` | yes | no dedicated art pack | yes |
+| `editorial-motion-graphics` | yes | no dedicated art pack | yes |
+| `stylized-3d-diorama` | yes | no dedicated art pack; Canvas isometric simulation only, no WebGL | yes |
+
+The gallery module (`factory/scripts/support/style-gallery-module.ts`) is a synthetic contract proof: one self-contained Canvas module draws six structurally different languages. It is not production art, and rendering it is not an artistic approval.
+
 ## Themes
 
 `factory/src/style/themes.ts` defines optional themes that own shared roles (`bg`, `ink`, `accent`, `paper`, `flash`, and so on). A theme can change the ground and accent of a title card, HUD or editorial layout. It cannot turn one style into another.
@@ -161,9 +176,12 @@ npm run style -- inspect --id cinematic-illustration-2p5d
 npm run style -- check --project <projectId> --workspace <external-workspace>
 npm run style:verify
 npm run style:media:verify
+npm run style:gallery:seed -- --workspace <external-workspace>
 ```
 
-`style:verify` creates a disposable synthetic two-second project, renders the same module under `cinematic-illustration-2p5d` and `retro-pixel`, decodes raw pixels, verifies a structural difference, verifies deterministic repeat output, and verifies that an unknown style is refused without writing an output file.
+`style:verify` creates a disposable synthetic two-second project, renders the same module under all six registered styles, compares every style pair on decoded pixels and edge structure, verifies deterministic repeat output, and verifies that an unknown style is refused without writing an output file.
+
+`style:gallery:seed` writes six runnable synthetic projects (one per registered style) into an external workspace. Each project carries the same one-module gallery, a generated 2 s score and a matching `visual.style.id`; no media is committed. Render any of them with `npm run render:project -- --project synthetic-style-<slug> --mode still --frame 24`.
 
 `style:media:verify` creates a disposable synthetic project that mixes a styled Canvas shot, a Video shot, a Hybrid shot and a 2.5D shot. It measures the decoded displacement of three colour-coded depth stripes, checks that foreground moves more than subject and subject more than midground, decodes a short MP4 for codec/size/fps/frames/pixel format/audio streams, and proves unknown styles, unsupported combinations, unapproved media and missing depth tiers fail closed with no output.
 

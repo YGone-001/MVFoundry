@@ -12,13 +12,12 @@ const chapterA: RenderProjectChapter = {
       chapterTitle: 'Demo A',
       startFrame: 0,
       endFrame: 24,
-      renderer: 'pixel-canvas',
+      renderer: 'layered-canvas',
       params: {
-        background: '#0B1B2B',
-        accent: '#2EC4B6',
-        secondary: '#FF9F1C',
-        bars: 7,
-        motion: 2.5,
+        background: '#07101c',
+        accent: '#2f6474',
+        secondary: '#e29a4a',
+        motion: 1.2,
       },
     },
   ],
@@ -36,13 +35,12 @@ const chapterB: RenderProjectChapter = {
       chapterTitle: 'Demo B',
       startFrame: 24,
       endFrame: 48,
-      renderer: 'pixel-canvas',
+      renderer: 'layered-canvas',
       params: {
-        background: '#123044',
-        accent: '#FF9F1C',
-        secondary: '#E9E3D2',
-        bars: 5,
-        motion: 4,
+        background: '#141014',
+        accent: '#4a2630',
+        secondary: '#d97757',
+        motion: 1.6,
       },
     },
   ],
@@ -53,9 +51,11 @@ export const DEFAULT_RENDER_PROJECT: RenderProjectSnapshot = {
   song: {title: 'MV Factory Demo', artist: 'Factory'},
   output: {width: 1920, height: 1080, fps: 24, durationInFrames: 48},
   visual: {
-    styleProfile: 'pixel-art',
-    defaultRenderer: 'pixel-canvas',
-    pixel: {internalWidth: 480, internalHeight: 270, samplingFps: 12},
+    // The default Remotion composition is a non-pixel, full-resolution
+    // layered-canvas abstract so a fresh checkout is not mistaken for a
+    // pixel-art-only engine. Pixel art remains available as one style among six.
+    styleProfile: 'layered-abstract',
+    defaultRenderer: 'layered-canvas',
   },
   narrative: {mode: 'abstract'},
   cues: [

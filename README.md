@@ -59,8 +59,9 @@ No song, recording, lyric, reference image, production scene or rendered video i
 
 **Renderers and visual styles**
 
-- Six renderer kinds: `pixel-canvas`, `layered-canvas`, `project:<id>`, `video`, `hybrid`, `parallax-2p5d`.
+- Six renderer identities: five built-in (`pixel-canvas`, `layered-canvas`, `video`, `hybrid`, `parallax-2p5d`) plus `project:<id>` Canvas modules.
 - Visual styles are a separate catalog of visual languages, not additional renderers; `svg`, `html` and `three` are declared blocked rather than faked.
+- `pixel-canvas` is one selectable look, not the default: the `MV-Factory` demo composition renders a full-resolution `layered-canvas` abstract.
 - Project-local Canvas 2D scene modules are hash-verified and statically screened before bundling.
 - Asset-backed 2.5D compositing uses one plate, depth-ordered cutouts and a deterministic camera, with authored depth of field.
 
@@ -210,16 +211,16 @@ The surrounding stages are local and inspectable at every step:
 
 | Renderer | Status | Behavior |
 |---|---|---|
-| `pixel-canvas` | Implemented | Configurable internal resolution, nearest-neighbour display, hold-based sampling |
-| `layered-canvas` | Implemented foundation | Full-resolution Canvas 2D with an optional approved image background |
+| `layered-canvas` | Implemented foundation | Full-resolution Canvas 2D with an optional approved image background; default demo look |
 | `project:<id>` | Implemented | Trusted, hash-verified project-local Canvas 2D module bound per bundle |
 | `video` | Implemented | Approved local H.264 MP4 with shot-local in-point, fit/scale and muted source audio |
 | `hybrid` | Implemented | Video background, ordered transparent PNG layers and a deterministic Canvas overlay |
 | `parallax-2p5d` | Implemented | One approved plate, depth-ordered RGBA cutouts, deterministic camera and authored depth of field |
+| `pixel-canvas` | Implemented | Configurable internal resolution, nearest-neighbour display, hold-based sampling; one style, not the default |
 
 Renderers are a discriminated union. Canvas renderers keep the `canvasSize` / `samplingFps` / `render(ctx, ...)` contract; media renderers expose a React component rendered inside a shot-local `Sequence`. Adding a renderer never changes the frame clock, and an unknown renderer fails at project load.
 
-Visual styles are orthogonal to renderers. Six profiles are registered and implemented on Canvas 2D: `cinematic-illustration-2p5d`, `anime-motion-comic`, `ink-watercolor`, `editorial-motion-graphics`, `stylized-3d-diorama` and `retro-pixel`. A style declares its own media routes, so `video` and `hybrid` are only available to styles that name them. See [visual styles](docs/visual-styles.md) and [rendering](docs/rendering.md).
+Visual styles are orthogonal to renderers. Six profiles are registered and implemented on Canvas 2D: `cinematic-illustration-2p5d`, `anime-motion-comic`, `ink-watercolor`, `editorial-motion-graphics`, `stylized-3d-diorama` and `retro-pixel`. They are catalog definitions plus validation contracts, not six built-in renderers: a style-driven shot must run through a project module that declares the style, or a media renderer the style explicitly lists in `mediaRoutes`. Shipped procedural art currently covers cinematic, anime and pixel; ink, editorial and diorama need supplied art or a project module. See [visual styles](docs/visual-styles.md) and [rendering](docs/rendering.md).
 
 > **Trust boundary:** a matching SHA256 proves byte identity, not benign behavior. Importing a verified module executes its top-level code in the browser when the bundle loads. The static source policy rejects imports, network APIs, dynamic code, DOM access, timers, clocks and randomness, but it is a rejection policy, not a sandbox. Approve the whole module, not only its `render` function.
 
@@ -305,8 +306,9 @@ npm run verify:modules
 
 ```bash
 npx remotion studio factory/src/entry.tsx
-npm run render:project -- --project synthetic-pixel-demo --mode video --frames 0-23
+npm run render:project -- --project synthetic-layered-demo --mode video --frames 0-23
 npm run render:project -- --project synthetic-module-layered-demo --mode still --frame 20
+npm run render:project -- --project synthetic-pixel-demo --mode video --frames 0-23
 ```
 
 Frames, caches, reports and outputs are written only inside the external project's `cache/` and `renders/` directories.
@@ -375,7 +377,8 @@ node factory/scripts/mv-project.mjs init \
 | `npm run mv:seed` / `mv:verify -- --produce` | Complete synthetic music video, produced and verified |
 | `npm run mv:seed-b` / `mv:verify-b` | Independent 50-second 5/4 project proving engine independence |
 | `npm run onboarding:seed` / `onboarding:verify` | Creator onboarding from fresh init to a decoded 900-frame MP4 |
-| `npm run style:verify` / `style:media:verify` | Style selection changes decoded pixels; mixed-media style timelines |
+| `npm run style:verify` / `style:media:verify` | Six-style decoded-pixel matrix; mixed-media style timelines |
+| `npm run style:gallery:seed` | Seed six runnable synthetic projects, one per registered style, in an external workspace |
 | `npm run verify:modules` | Module bundling and still-render evidence |
 | `npm run audit:git` / `audit:publication` | Media-in-Git audit and publication allowlist audit |
 

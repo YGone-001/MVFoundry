@@ -190,12 +190,12 @@ Preproduction is a local planning layer, not semantic music understanding and no
 
 | Renderer | Status | Notes |
 |---|---|---|
-| `pixel-canvas` | implemented | configurable internal resolution; hold-based sampling |
-| `layered-canvas` | implemented foundation | full-resolution Canvas 2D; approved image background |
+| `layered-canvas` | implemented foundation | full-resolution Canvas 2D; approved image background; default `MV-Factory` demo look |
 | `project:<id>` | implemented | trusted project-local Canvas 2D module bound per bundle |
 | `video` | implemented | approved local H.264 MP4; shot-local source in-point; muted source audio |
 | `hybrid` | implemented | video + ordered transparent PNG layers + deterministic Canvas overlay |
 | `parallax-2p5d` | implemented | one approved plate + depth-ordered RGBA layers, deterministic camera, atmosphere, grade and optional comic treatment |
+| `pixel-canvas` | implemented | configurable internal resolution; hold-based sampling; one selectable style, not the default |
 
 Renderers are a discriminated union: Canvas renderers keep the existing `canvasSize`, `samplingFps` and `render(ctx, ...)` contract; media renderers expose a React `Component` rendered inside the composition. Existing custom Canvas renderers remain valid. Adding a renderer does not change the frame clock. Unknown renderers fail at project load.
 
@@ -217,7 +217,7 @@ The generated entry calls `bindProjectSceneModules`, which validates the exporte
 - `canvas.mode: output` provides full-resolution Canvas 2D; `project-pixel` keeps integer pixels and hold-based sampling.
 - All six registered styles are implemented on Canvas 2D. `svg`, `html` and `three` are declared `BLOCKED_CAPABILITY` with concrete contract/security/determinism gaps; entering a style does not make those backends available.
 - `footage-hybrid` remains the approved video/layer route. `video` and `hybrid` are style-bound only for styles that declare them; `retro-pixel` declares no media route and therefore refuses footage.
-- `npm run style:verify` renders two styles through the same module in a disposable synthetic workspace and compares decoded raw pixels, deterministic repeats and unknown-style refusal. `npm run style:media:verify` additionally proves mixed Canvas/Video/Hybrid/2.5D timelines and measures decoded per-depth displacement. Both are bounded CI evidence, not a full artistic demonstration.
+- `npm run style:verify` renders all six registered styles through the same module in a disposable synthetic workspace and compares decoded raw pixels, pairwise structure, deterministic repeats and unknown-style refusal. `npm run style:media:verify` additionally proves mixed Canvas/Video/Hybrid/2.5D timelines and measures decoded per-depth displacement. Both are bounded CI evidence, not a full artistic demonstration.
 
 ### Asset-backed 2.5D composition
 

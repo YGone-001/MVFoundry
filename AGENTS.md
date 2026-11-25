@@ -287,6 +287,7 @@ Do not treat plans, prior reports or user summaries as proof of the current file
 ### Visual styles and renderer backends
 
 - Visual style, rendering backend and asset production are separate concepts. A style is a visual language, not a renderer and not a palette. All six registered P1-G-A styles currently execute on Canvas 2D and must produce structurally different images.
+- The default `MV-Factory` composition uses the non-pixel `layered-canvas` renderer. `pixel-canvas` is one selectable style, not the engine's default identity, and no engine invariant may make pixel art the only presentable output.
 - `factory/src/style/catalog.ts` is the style registry; `factory/src/style/themes.ts` owns optional role themes. `visual.style` is optional and legacy projects keep `visual.styleProfile` unchanged. There is no breaking schema migration.
 - A style-driven project may mix project Canvas modules with style-declared media renderers. `sceneModules[].styleIds` declares the project capability and the module export must declare matching `supportedStyles`; a mismatch fails closed at bundle bind. A media renderer is allowed only when the selected style declares that route in `mediaRoutes`; the catalog never assumes approved footage is compatible with every style.
 - The module render context receives a frozen `style` object with the active id, label, optional theme roles and the full profile. Legacy modules receive `null`; the engine never invents a default style.
@@ -300,7 +301,7 @@ Do not treat plans, prior reports or user summaries as proof of the current file
 - Unknown styles, unsupported style/backend combinations, missing media, wrong asset kinds, unapproved assets, stale hashes, unaligned source in-points, wrong depth order and missing depth tiers fail closed before any output file is written.
 - `npm run style:media:verify` is the bounded CI regression. It renders a styled Canvas shot, a Video shot, a Hybrid shot and a 2.5D shot in one synthetic project, measures decoded per-depth stripe displacement, decodes a short MP4 for codec, size, fps, frame count, pixel format and audio-stream count, and proves four negative controls write nothing.
 - `npm run style:art`, `npm run style:prototype:seed` and `npm run style:review` reproduce the local artistic prototypes and the human review package. The prototypes prove that the compositor works and that two visual languages read differently; they do not establish artistic approval. The verdict stays `PENDING_HUMAN_REVIEW` until the creator reviews the actual clips.
-- `npm run style:verify` creates a disposable synthetic project, renders two styles through the same module, compares decoded raw pixels, checks deterministic repeats and verifies unknown-style refusal with no output file. A full gallery or a valid still does not establish human artistic approval.
+- `npm run style:verify` creates a disposable synthetic project, renders all six registered styles through the same module, compares every pair on decoded pixels and edge structure, checks deterministic repeats and verifies unknown-style refusal with no output file. `npm run style:gallery:seed` writes six runnable synthetic projects (one per style) into an external workspace; it shares the same self-contained module template and never commits media. Neither establishes human artistic approval.
 - The six-style gallery, boards, frames, videos and quality records stay in the external workspace. Missing fidelity must be disclosed (`BLOCKED_CAPABILITY` or an asset limitation), never replaced by a style label.
 
 ### Character performance, pose assets and 2.5D storyboards
@@ -415,6 +416,7 @@ npm run style:verify
 npm run style:media:verify
 npm run style:art -- --workspace <external-workspace> --project <style-project> --set cinematic|anime
 npm run style:prototype:seed -- --workspace <external-workspace> --project <style-project> --set cinematic|anime
+npm run style:gallery:seed -- --workspace <external-workspace>
 npm run render:project -- --project <style-project> --mode video --frames 0-359
 npm run style:review -- --workspace <external-workspace>
 npm run verify:modules

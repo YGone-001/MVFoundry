@@ -27,6 +27,7 @@ import {
   isRegisteredTheme,
 } from '../src/style/themes';
 import type {RenderProjectSnapshot, RenderProjectShot} from '../src/config/types';
+import {DEFAULT_RENDER_PROJECT} from '../src/remotion/defaultProject';
 import type {SceneFrameInfo} from '../src/timeline/frameClock';
 import {REPO_ROOT} from './helpers';
 
@@ -381,5 +382,19 @@ test('style profiles are frozen and cannot be mutated by a scene module', () => 
   assert.throws(() => {
     (profile as any).label = 'mutated';
   }, TypeError);
+});
+
+test('the default Remotion composition is not pixel-only', () => {
+  // A fresh checkout must not present pixel art as the engine's identity:
+  // pixel art is one selectable style, not the default rendering language.
+  assert.equal(DEFAULT_RENDER_PROJECT.visual.defaultRenderer, 'layered-canvas');
+  assert.equal(DEFAULT_RENDER_PROJECT.visual.styleProfile, 'layered-abstract');
+  assert.equal(DEFAULT_RENDER_PROJECT.visual.pixel, undefined);
+  assert.ok(rendererKinds.has(DEFAULT_RENDER_PROJECT.visual.defaultRenderer));
+  for (const chapter of DEFAULT_RENDER_PROJECT.chapters) {
+    for (const shot of chapter.shots) {
+      assert.equal(shot.renderer, 'layered-canvas');
+    }
+  }
 });
 

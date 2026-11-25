@@ -25,13 +25,13 @@
 npx remotion studio factory/src/entry.tsx
 ```
 
-The default composition is a synthetic two-shot demo using built-in renderers. A project render validates and stages the project, generates a project-specific entry and bundles it locally. Media projects are previewed through the generated project entry during rendering; the static Studio default does not include external media.
+The default composition is a synthetic two-shot demo using built-in renderers; the `MV-Factory` composition uses the non-pixel `layered-canvas` renderer. A project render validates and stages the project, generates a project-specific entry and bundles it locally. Media projects are previewed through the generated project entry during rendering; the static Studio default does not include external media.
 
 ## Project render
 
 ```bash
 npm run build
-npm run render:project -- --project synthetic-pixel-demo --mode video --frames 0-23
+npm run render:project -- --project synthetic-layered-demo --mode video --frames 0-23
 npm run render:project -- --project synthetic-module-pixel-demo --mode video --frames 0-47
 npm run render:project -- --project synthetic-module-layered-demo --mode still --frame 20
 npm run verify:modules
@@ -72,9 +72,10 @@ npm run style -- inspect --id cinematic-illustration-2p5d
 npm run style -- check --project synthetic-module-pixel-demo --workspace <external-workspace>
 npm run style:verify
 npm run style:media:verify
+npm run style:gallery:seed -- --workspace <external-workspace>
 ```
 
-`style:verify` renders real stills in a disposable synthetic workspace, compares decoded pixels (not just metadata), checks deterministic repeat output and verifies that an unknown style is refused without writing an output file. `style:media:verify` adds the mixed Canvas/Video/Hybrid/2.5D timeline with decoded per-depth displacement evidence.
+`style:verify` renders all six registered styles through one shared self-contained module in a disposable synthetic workspace, compares every style pair on decoded pixels and edge structure (not just metadata), checks deterministic repeat output and verifies that an unknown style is refused without writing an output file. `style:media:verify` adds the mixed Canvas/Video/Hybrid/2.5D timeline with decoded per-depth displacement evidence.
 
 ## Output override policy
 

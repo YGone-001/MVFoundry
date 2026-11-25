@@ -7,6 +7,7 @@
     "THIRD_PARTY_NOTICES.md",
     ".gitignore",
     ".gitattributes",
+    "LICENSE",
     "package.json",
     "package-lock.json",
     "tsconfig.json",
@@ -59,6 +60,7 @@
   "allowedUrlHosts": [
     "registry.npmjs.org",
     "github.com",
+    "img.shields.io",
     "remotion.dev",
     "www.remotion.dev",
     "remotion.pro",
