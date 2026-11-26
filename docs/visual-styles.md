@@ -57,6 +57,15 @@ The attach step requires `--approve-module`, a project-relative module path unde
 
 Neither command approves an asset, plan or storyboard. A recorded module approval is an operational decision, not an artistic verdict.
 
+## Planning constraints
+
+A selected style is enforced during planning, not only when rendering. The creative brief's `preferredRenderers` and every `rendererDirectives[]` entry, every director-plan shot and every storyboard shot must be either:
+
+- a project module whose `styleIds` declares the selected style, or
+- a media renderer listed in that style's `mediaRoutes`.
+
+A legacy project without `visual.style` keeps the old behaviour. A style-selected project that plans a built-in Canvas renderer, an undeclared project module, or a media route the style never declared fails at brief/plan/storyboard validation with a named refusal; compilation is not the first line of defence. For example, `retro-pixel` cannot plan `video`, `hybrid` or `parallax-2p5d`.
+
 ## Themes
 
 `factory/src/style/themes.ts` defines optional themes that own shared roles (`bg`, `ink`, `accent`, `paper`, `flash`, and so on). A theme can change the ground and accent of a title card, HUD or editorial layout. It cannot turn one style into another.

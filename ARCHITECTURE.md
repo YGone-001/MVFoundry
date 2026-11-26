@@ -213,6 +213,7 @@ The generated entry calls `bindProjectSceneModules`, which validates the exporte
 
 - `visual.style` is optional. Legacy projects keep `visual.styleProfile` and are not reinterpreted.
 - A style-driven project may mix project Canvas modules with style-declared media renderers. `sceneModules[].styleIds` declares project capability, the module export declares `supportedStyles`, and the two must agree or the bundle bind fails. A media renderer additionally requires the selected style to declare that route in `mediaRoutes`.
+- Style compatibility is also a planning constraint: the creative brief's preferred renderers and directives, every director-plan shot and every storyboard shot must be a style-declaring module or a style-declared media route. Compilation is not the first line of defence.
 - The module render context receives a frozen `style` object, including optional theme roles and the full profile. Legacy modules receive `null`.
 - `canvas.mode: output` provides full-resolution Canvas 2D; `project-pixel` keeps integer pixels and hold-based sampling.
 - All six registered styles are implemented on Canvas 2D. `svg`, `html` and `three` are declared `BLOCKED_CAPABILITY` with concrete contract/security/determinism gaps; entering a style does not make those backends available.

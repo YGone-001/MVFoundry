@@ -149,7 +149,7 @@ Validation enforces UTF-8, explicit timestamps, strictly increasing timing, proj
 - required asset briefs;
 - editable assumptions.
 
-The aspect ratio must match the project output. Preferred renderers must be registered. Approved references must exist and be approved. No style, song, language, shot count, palette or ratio is a global default.
+The aspect ratio must match the project output. Preferred renderers must be registered. When the project selects a registered visual style, preferred renderers, renderer directives, plan shots and storyboard shots must be a style-declaring project module or a style-declared media route; that check runs at planning time, not only at compile. Approved references must exist and be approved. No style, song, language, shot count, palette or ratio is a global default.
 
 ## 6. Director plan
 

@@ -59,6 +59,7 @@ if (!workspaceRoot) {
 }
 
 const {loadProject} = require('../dist/src/project/loadProject.js');
+const {styleCompatibilityForProject} = require('../dist/src/preproduction/styleCompatibility.js');
 const {decodeAudioToNormalizedPcm} = require('../dist/src/media/audioDecode.js');
 const {stereoToMono} = require('../dist/src/audio/analysis.js');
 const {DEFAULT_SCENE_REGISTRY} = require('../dist/src/scenes/registry.js');
@@ -172,6 +173,7 @@ const loadInputs = ({requireApproved = false} = {}) => {
       ...DEFAULT_SCENE_REGISTRY.kinds(),
       ...project.sceneModules.map((module) => `project:${module.id}`),
     ]),
+    ...styleCompatibilityForProject(project),
   };
   const annotationsRaw = readProjectJson(project.projectDir, PREPRODUCTION_PATHS.annotations, {engineRoot: repoRoot});
   const annotations = validateAnnotations(annotationsRaw, context, {

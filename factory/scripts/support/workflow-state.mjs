@@ -11,6 +11,7 @@ export const {assertSafePath, createProjectWriteBoundary, ensureSafeDirectory, r
 export const {PREPRODUCTION_PATHS: P, revisionPath, readOptionalProjectJson, readOptionalProjectText, writeProjectJson} = require('../../dist/src/preproduction/store.js');
 export const {buildCandidateProject} = require('../../dist/src/preproduction/compile.js');
 const {validateStoryboard, validatePlan} = require('../../dist/src/preproduction/storyboard.js');
+const {styleCompatibilityForProject} = require('../../dist/src/preproduction/styleCompatibility.js');
 const V = require('../../dist/src/preproduction/validate.js');
 const {DEFAULT_SCENE_REGISTRY} = require('../../dist/src/scenes/registry.js');
 const {probeVideo} = require('../../dist/src/media/videoProbe.js');
@@ -49,6 +50,7 @@ export function inputs(w) {
   const context = {projectId: w.projectId, fps: project.config.output.fps, durationInFrames: project.durationInFrames,
     width: project.config.output.width, height: project.config.output.height, assets: project.config.assets,
     rendererKinds: new Set([...DEFAULT_SCENE_REGISTRY.kinds(), ...project.sceneModules.map((m) => `project:${m.id}`)])};
+  Object.assign(context, styleCompatibilityForProject(project));
   const annotations = V.validateAnnotations(read(P.annotations), context, {requireApproved: true});
   context.sections = annotations.sections;
   const brief = V.validateCreativeBrief(read(P.brief), context);

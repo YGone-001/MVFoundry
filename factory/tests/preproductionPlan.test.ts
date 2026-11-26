@@ -12,6 +12,7 @@ import {buildApprovedBeatGrid} from '../src/preproduction/beatGrid';
 import {
   buildStoryboard,
   validatePlan,
+  validateStoryboard,
 } from '../src/preproduction/storyboard';
 import {compileApprovedStoryboard} from '../src/preproduction/compile';
 import {
@@ -117,6 +118,29 @@ test('Project A plan, storyboard, and candidate compile are complete and frame-a
   assert.equal(storyboard.missingAssetRequirements.length, 0);
   assert.equal(storyboard.chapters[0].startFrame, 0);
   assert.equal(storyboard.chapters[2].endFrame, 120);
+
+  // Planning fails closed when the selected style never declared the planned
+  // renderer. The same check runs at plan validation and storyboard validation,
+  // so compilation is not the first place a style/media mismatch appears.
+  const styledProject = {
+    ...project,
+    config: {
+      ...project.config,
+      visual: {...project.config.visual, style: {id: 'retro-pixel'}},
+    },
+  };
+  const styledPlan = JSON.parse(JSON.stringify(plan));
+  styledPlan.chapters[0].shots[0].renderer = 'video';
+  assert.throws(
+    () => validatePlan(styledPlan, styledProject, annotations, null),
+    /does not declare|not allowed by visual style/,
+  );
+  const styledStoryboard = JSON.parse(JSON.stringify(storyboard));
+  styledStoryboard.chapters[0].shots[0].renderer = 'video';
+  assert.throws(
+    () => validateStoryboard(styledStoryboard, styledProject, annotations, null),
+    /does not declare|not allowed by visual style/,
+  );
 
   const boundary = createProjectWriteBoundary(project, {engineRoot: REPO_ROOT});
   const result = compileApprovedStoryboard({

@@ -20,6 +20,7 @@ import {
   checkContinuityUsage,
   validatePlannedMedia,
 } from './validate';
+import {assertRendererAllowedByProject} from './styleCompatibility';
 
 const record = (value: unknown, field: string): Record<string, unknown> => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -239,6 +240,7 @@ export const validatePlan = (
           DEFAULT_SCENE_REGISTRY.kinds().includes(renderer) ||
           project.sceneModules.some((module) => renderer === `project:${module.id}`);
         if (!known) throw new PreproductionError(`${field}.renderer is not available`);
+        assertRendererAllowedByProject(project, renderer, `${field}.renderer`);
         const assetRequirementIds = shot.assetRequirementIds === undefined
           ? []
           : array(shot.assetRequirementIds, `${field}.assetRequirementIds`).map((id, index) =>
@@ -601,6 +603,7 @@ export const validateStoryboard = (
           DEFAULT_SCENE_REGISTRY.kinds().includes(renderer) ||
           project.sceneModules.some((module) => renderer === `project:${module.id}`);
         if (!known) throw new PreproductionError(`${field}.renderer is not available`);
+        assertRendererAllowedByProject(project, renderer, `${field}.renderer`);
         const requirementRefs = shot.assetRequirementIds === undefined
           ? []
           : array(shot.assetRequirementIds, `${field}.assetRequirementIds`).map((id, index) =>

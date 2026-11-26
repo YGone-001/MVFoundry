@@ -111,6 +111,7 @@ const {
   parseLrcLyrics,
 } = require('../dist/src/preproduction/validate.js');
 const {validateStoryboard} = require('../dist/src/preproduction/storyboard.js');
+const {styleCompatibilityForProject} = require('../dist/src/preproduction/styleCompatibility.js');
 const {
   GENERATION_PATHS,
   buildProviderRequest,
@@ -248,6 +249,7 @@ const loadContext = () => {
       ...DEFAULT_SCENE_REGISTRY.kinds(),
       ...project.sceneModules.map((module) => `project:${module.id}`),
     ]),
+    ...styleCompatibilityForProject(project),
   };
   const annotations = validateAnnotations(
     readProjectJson(project.projectDir, PREPRODUCTION_PATHS.annotations),

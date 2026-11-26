@@ -113,6 +113,38 @@ test('creative briefs are style-independent but must match the project profile',
   assert.throws(() => validateCreativeBrief(unknownReference, beat), /unknown asset/);
 });
 
+test('style-selected creative briefs reject incompatible renderers', () => {
+  const retro = {
+    ...contextFor('synthetic-beat-demo', 640, 360),
+    styleId: 'retro-pixel',
+    styleModuleIds: new Set<string>(),
+  };
+  const video = clone(template('synthetic-beat-demo', 'creative-brief.template.json'));
+  video.preferredRenderers = ['video'];
+  video.rendererDirectives = [];
+  assert.throws(() => validateCreativeBrief(video, retro), /does not declare/);
+
+  const layered = clone(template('synthetic-beat-demo', 'creative-brief.template.json'));
+  layered.preferredRenderers = ['layered-canvas'];
+  layered.rendererDirectives = [];
+  assert.throws(() => validateCreativeBrief(layered, retro), /is not allowed by visual style/);
+
+  const cinematic = {
+    ...contextFor('synthetic-beat-demo', 640, 360),
+    rendererKinds: new Set([...DEFAULT_SCENE_REGISTRY.kinds(), 'project:style-module', 'project:other']),
+    styleId: 'cinematic-illustration-2p5d',
+    styleModuleIds: new Set(['style-module']),
+  };
+  const moduleBrief = clone(template('synthetic-beat-demo', 'creative-brief.template.json'));
+  moduleBrief.preferredRenderers = ['project:style-module'];
+  moduleBrief.rendererDirectives = [];
+  assert.doesNotThrow(() => validateCreativeBrief(moduleBrief, cinematic));
+
+  const wrongModule = clone(moduleBrief);
+  wrongModule.preferredRenderers = ['project:other'];
+  assert.throws(() => validateCreativeBrief(wrongModule, cinematic), /does not declare/);
+});
+
 test('section labels and lyric languages remain user-defined', () => {
   const labels = template('synthetic-beat-demo', 'annotations.template.json');
   labels.sections[1].label = 'pre-chorus';

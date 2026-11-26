@@ -32,6 +32,7 @@ import type {
   SectionAnnotation,
 } from './types';
 import {BEAT_GRID_ALGORITHM_VERSION, CONTINUITY_SCHEMA_VERSION, ASSET_INTAKE_SCHEMA_VERSION} from './types';
+import {assertRendererAllowedByStyle} from './styleCompatibility';
 
 const MEDIA_FITS: readonly ['contain', 'cover'] = ['contain', 'cover'];
 const CONTINUITY_KINDS = [
@@ -54,6 +55,10 @@ export type PreproductionContext = {
   assets: ProjectAsset[];
   rendererKinds: ReadonlySet<string>;
   sections?: SectionAnnotation[];
+  /** Selected visual style, when the project declares one. */
+  styleId?: string;
+  /** Scene module ids that explicitly declare the selected style. */
+  styleModuleIds?: ReadonlySet<string>;
 };
 
 const APPROVALS: readonly ApprovalStatus[] = ['draft', 'proposed', 'approved', 'rejected'];
@@ -747,6 +752,7 @@ const validateRendererDirective = (
   if (!context.rendererKinds.has(renderer)) {
     fail(`${field}.renderer references unregistered renderer ${renderer}`);
   }
+  assertRendererAllowedByStyle(context, renderer, `${field}.renderer`);
   const isMediaRenderer = renderer === 'video' || renderer === 'hybrid' || renderer === 'parallax-2p5d';
   if (!isMediaRenderer && directive.media !== undefined && directive.media !== null) {
     fail(`${field}.media is only valid for the video, hybrid and parallax-2p5d renderer directives`);
@@ -822,6 +828,7 @@ export const validateCreativeBrief = (
     if (!context.rendererKinds.has(renderer)) {
       fail(`creativeBrief.preferredRenderers references unregistered renderer ${renderer}`);
     }
+    assertRendererAllowedByStyle(context, renderer, 'creativeBrief.preferredRenderers');
   }
   const requiredAssets = (brief.requiredAssets === undefined
     ? []
