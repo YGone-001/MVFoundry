@@ -32,9 +32,9 @@ Registration is not shipped artwork. This table states what actually exists in t
 | `cinematic-illustration-2p5d` | yes | yes — cinematic art plates, 2.5D and character-performance prototypes | yes |
 | `anime-motion-comic` | yes | yes — anime art plates and motion-comic prototype | yes |
 | `retro-pixel` | yes | yes — the built-in `pixel-canvas` renderer; the gallery module is the style-bound example | yes |
-| `ink-watercolor` | yes | no dedicated art pack | yes |
-| `editorial-motion-graphics` | yes | no dedicated art pack | yes |
-| `stylized-3d-diorama` | yes | no dedicated art pack; Canvas isometric simulation only, no WebGL | yes |
+| `ink-watercolor` | yes | starter 3-plate pack: paper, brush strokes, figure/seal | yes |
+| `editorial-motion-graphics` | yes | starter 3-plate pack: grid, duotone cutout, graphics | yes |
+| `stylized-3d-diorama` | yes | starter 3-plate pack: isometric stage, shelter, rail; Canvas only, no WebGL | yes |
 
 The gallery module (`factory/scripts/support/style-gallery-module.ts`) is a synthetic contract proof: one self-contained Canvas module draws six structurally different languages. It is not production art, and rendering it is not an artistic approval.
 
@@ -216,13 +216,13 @@ npm run style:gallery:seed -- --workspace <external-workspace>
 ## Local artistic prototypes
 
 ```bash
-npm run style:art -- --workspace <external-workspace> --project <project> --set cinematic
+npm run style:art -- --workspace <external-workspace> --project <project> --set cinematic|anime|ink|editorial|diorama
 npm run style:prototype:seed -- --workspace <external-workspace> --project <project> --set cinematic
 npm run render:project -- --project <project> --mode video --frames 0-359
 npm run style:review -- --workspace <external-workspace>
 ```
 
-`style:art` renders original procedural plates through the local browser canvas. `style:prototype:seed` writes the 15-second four-shot project and an original synthetic score. `style:review` extracts real decoded frames, builds labeled contact sheets, records technical QC and writes the human review checklist. These outputs are external and are not part of CI.
+`style:art` renders original procedural plates through the local browser canvas. `--set cinematic|anime` provides the fuller prototype plates; `--set ink|editorial|diorama` writes the starter 3-plate packs (opaque background plus two transparent cutouts) for 2.5D authoring. `style:prototype:seed` writes the 15-second four-shot project and an original synthetic score for cinematic/anime. `style:review` extracts real decoded frames, builds labeled contact sheets, records technical QC and writes the human review checklist. These outputs are external and are not part of CI.
 
 The prototypes prove that the compositor and the style-aware media route work, and that two visual languages differ structurally. They do not establish artistic approval; the verdict remains `PENDING_HUMAN_REVIEW` until the creator reviews the clips.
 

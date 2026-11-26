@@ -386,6 +386,7 @@ node factory/scripts/mv-project.mjs attach-style \
 | `npm run mv:seed-b` / `mv:verify-b` | Independent 50-second 5/4 project proving engine independence |
 | `npm run onboarding:seed` / `onboarding:verify` | Creator onboarding from fresh init to a decoded 900-frame MP4 |
 | `npm run style:verify` / `style:media:verify` | Six-style decoded-pixel matrix; mixed-media style timelines |
+| `npm run style:art` | Procedural plates: cinematic/anime prototypes plus ink/editorial/diorama starter packs |
 | `npm run style:gallery:seed` | Seed six runnable synthetic projects, one per registered style, in an external workspace |
 | `npm run verify:modules` | Module bundling and still-render evidence |
 | `npm run audit:git` / `audit:publication` | Media-in-Git audit and publication allowlist audit |

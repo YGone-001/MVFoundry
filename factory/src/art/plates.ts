@@ -24,6 +24,17 @@ import {
   drawAnimeWoman,
 } from './animePlates';
 import {CHARACTER_PLATES} from './characterPlates';
+import {drawInkForeground, drawInkMidground, drawInkPaperBackground} from './inkPlates';
+import {
+  drawEditorialCutoutMidground,
+  drawEditorialGraphicsForeground,
+  drawEditorialGridBackground,
+} from './editorialPlates';
+import {
+  drawDioramaForeground,
+  drawDioramaMidground,
+  drawDioramaStageBackground,
+} from './dioramaPlates';
 
 export type ArtPlateSpec = {
   name: string;
@@ -35,8 +46,10 @@ export type ArtPlateSpec = {
 };
 
 /**
- * The approved artwork inventory for the two prototypes. Every plate is
- * generated offline by this repository's own code; nothing is downloaded.
+ * The artwork inventory. Cinematic and anime carry the fuller prototype plates;
+ * ink, editorial and diorama add starter three-plate packs for 2.5D authoring.
+ * Every plate is generated offline by this repository's own code; nothing is
+ * downloaded.
  */
 export const ART_PLATES: readonly ArtPlateSpec[] = Object.freeze([
   {
@@ -182,6 +195,78 @@ export const ART_PLATES: readonly ArtPlateSpec[] = Object.freeze([
     opaque: false,
     note: 'Graphic tram with motion lines and a comic headlight starburst',
     draw: drawAnimeTram,
+  },
+  {
+    name: 'ink-bg-paper',
+    width: 1920,
+    height: 1080,
+    opaque: true,
+    note: 'Ink starter: cold-press paper, wash bands, tide stain and negative space',
+    draw: drawInkPaperBackground,
+  },
+  {
+    name: 'ink-mg-strokes',
+    width: 1920,
+    height: 1080,
+    opaque: false,
+    note: 'Ink starter: three soft brush strokes and a distant pigment wash',
+    draw: drawInkMidground,
+  },
+  {
+    name: 'ink-fg-figure',
+    width: 1920,
+    height: 1080,
+    opaque: false,
+    note: 'Ink starter: minimal figure strokes and the single vermilion seal',
+    draw: drawInkForeground,
+  },
+  {
+    name: 'editorial-bg-grid',
+    width: 1920,
+    height: 1080,
+    opaque: true,
+    note: 'Editorial starter: paper, 12-column grid, cobalt/yellow/coral fields',
+    draw: drawEditorialGridBackground,
+  },
+  {
+    name: 'editorial-mg-cutout',
+    width: 1920,
+    height: 1080,
+    opaque: false,
+    note: 'Editorial starter: duotone character block and secondary cobalt rule',
+    draw: drawEditorialCutoutMidground,
+  },
+  {
+    name: 'editorial-fg-graphics',
+    width: 1920,
+    height: 1080,
+    opaque: false,
+    note: 'Editorial starter: type-like bars, arrow, counter and baseline rules',
+    draw: drawEditorialGraphicsForeground,
+  },
+  {
+    name: 'diorama-bg-stage',
+    width: 1920,
+    height: 1080,
+    opaque: true,
+    note: 'Diorama starter: dark surround, isometric stage and soft contact shadow',
+    draw: drawDioramaStageBackground,
+  },
+  {
+    name: 'diorama-mg-shelter',
+    width: 1920,
+    height: 1080,
+    opaque: false,
+    note: 'Diorama starter: shelter, warm lamp practical and two miniature figures',
+    draw: drawDioramaMidground,
+  },
+  {
+    name: 'diorama-fg-rail',
+    width: 1920,
+    height: 1080,
+    opaque: false,
+    note: 'Diorama starter: foreground rail and tilt-shift frame',
+    draw: drawDioramaForeground,
   },
   ...CHARACTER_PLATES,
 ]);
