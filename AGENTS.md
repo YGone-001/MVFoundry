@@ -305,7 +305,8 @@ Do not treat plans, prior reports or user summaries as proof of the current file
 - Unknown styles, unsupported style/backend combinations, missing media, wrong asset kinds, unapproved assets, stale hashes, unaligned source in-points, wrong depth order and missing depth tiers fail closed before any output file is written.
 - `npm run style:media:verify` is the bounded CI regression. It renders a styled Canvas shot, a Video shot, a Hybrid shot and a 2.5D shot in one synthetic project, measures decoded per-depth stripe displacement, decodes a short MP4 for codec, size, fps, frame count, pixel format and audio-stream count, and proves four negative controls write nothing.
 - `npm run style:art`, `npm run style:prototype:seed` and `npm run style:review` reproduce the local artistic prototypes and the human review package. The prototypes prove that the compositor works and that two visual languages read differently; they do not establish artistic approval. The verdict stays `PENDING_HUMAN_REVIEW` until the creator reviews the actual clips.
-- `npm run style:art -- --set ink|editorial|diorama` writes starter three-plate packs (one opaque background plus two transparent cutouts); they are starters for 2.5D authoring, not full prototypes and not an artistic approval.
+- `npm run style:art -- --set ink|editorial|diorama` writes starter three-plate packs (one opaque background plus two transparent cutouts); they are starters for 2.5D authoring, not full prototypes and not an artistic approval. The diorama plates are reference-only under the current catalog: that style declares video/hybrid, not `parallax-2p5d`.
+- `npm run style:starter:seed -- --set ink|editorial|diorama` writes a 15-second, four-shot synthetic starter prototype. `ink` and `editorial` use the declared `parallax-2p5d` route and their plate packs; `diorama` uses a project-local Canvas isometric module because the catalog deliberately declares no parallax route for it. It does not establish artistic approval.
 - `npm run style:verify` creates a disposable synthetic project, renders all six registered styles through the same module, compares every pair on decoded pixels and edge structure, checks deterministic repeats and verifies unknown-style refusal with no output file. `npm run style:gallery:seed` writes six runnable synthetic projects (one per style) into an external workspace; it shares the same self-contained module template and never commits media. Neither establishes human artistic approval.
 - The six-style gallery, boards, frames, videos and quality records stay in the external workspace. Missing fidelity must be disclosed (`BLOCKED_CAPABILITY` or an asset limitation), never replaced by a style label.
 
@@ -422,6 +423,7 @@ npm run style:media:verify
 npm run style:art -- --workspace <external-workspace> --project <style-project> --set cinematic|anime|ink|editorial|diorama
 npm run style:prototype:seed -- --workspace <external-workspace> --project <style-project> --set cinematic|anime
 npm run style:gallery:seed -- --workspace <external-workspace>
+npm run style:starter:seed -- --workspace <external-workspace> --set ink|editorial|diorama
 npm run render:project -- --project <style-project> --mode video --frames 0-359
 npm run style:review -- --workspace <external-workspace>
 npm run verify:modules

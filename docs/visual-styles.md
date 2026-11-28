@@ -38,6 +38,8 @@ Registration is not shipped artwork. This table states what actually exists in t
 
 The gallery module (`factory/scripts/support/style-gallery-module.ts`) is a synthetic contract proof: one self-contained Canvas module draws six structurally different languages. It is not production art, and rendering it is not an artistic approval.
 
+`style:starter:seed --set ink|editorial|diorama` writes a 15-second, four-shot starter prototype for each. `ink` and `editorial` use their three-plate packs through `parallax-2p5d`; `diorama` uses a project-local Canvas isometric module because the catalog deliberately declares no parallax media route for it. These are starters, not finished films. The diorama starter plates are reference plates for future non-parallax work; the current diorama style declares video/hybrid only, so those plates are not bindable as a 2.5D route.
+
 ## Project scaffolding
 
 A style-driven project still needs a project-local Canvas module. `mv-project init --style-id <id>` writes an **unregistered** scaffold at `scenes/style-gallery.ts` and reports its SHA256; it does not touch `sceneModules` or `visual.style`.
@@ -205,6 +207,7 @@ npm run style -- check --project <projectId> --workspace <external-workspace>
 npm run style:verify
 npm run style:media:verify
 npm run style:gallery:seed -- --workspace <external-workspace>
+npm run style:starter:seed -- --workspace <external-workspace> --set ink|editorial|diorama
 ```
 
 `style:verify` creates a disposable synthetic two-second project, renders the same module under all six registered styles, compares every style pair on decoded pixels and edge structure, verifies deterministic repeat output, and verifies that an unknown style is refused without writing an output file.

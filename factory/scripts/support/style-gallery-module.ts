@@ -16,6 +16,7 @@ type RenderContext = {
   canvas: {width: number; height: number};
   frame: {localFrame: number; animationTick: number};
   style: StyleContext;
+  moduleParams?: Record<string, string | number | boolean>;
 };
 type Point = [number, number];
 
@@ -453,7 +454,7 @@ const sceneModule = {
   contractVersion: 1,
   moduleType: 'canvas2d' as const,
   label: 'Synthetic six-style gallery',
-  params: [] as Array<{key: string; type: 'string' | 'number' | 'boolean'; required?: boolean}>,
+  params: [{key: 'phase', type: 'number' as const}],
   assetDependencies: [] as string[],
   supportedStyles: [
     'cinematic-illustration-2p5d',
@@ -466,7 +467,8 @@ const sceneModule = {
   render: (ctx: Ctx, context: RenderContext): void => {
     const width = context.canvas.width;
     const height = context.canvas.height;
-    const tick = context.frame.animationTick;
+    const phase = typeof context.moduleParams?.phase === 'number' ? context.moduleParams.phase : 0;
+    const tick = context.frame.animationTick + phase;
     switch (context.style?.id) {
       case 'anime-motion-comic':
         drawAnime(ctx, width, height, tick);
