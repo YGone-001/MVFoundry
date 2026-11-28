@@ -46,6 +46,7 @@
     "style:prototype:seed": "npm run build && node factory/scripts/seed-style-prototype.mjs",
     "style:gallery:seed": "npm run build && node factory/scripts/seed-style-gallery.mjs",
     "style:starter:seed": "npm run build && node factory/scripts/seed-style-starter.mjs",
+    "perf:render": "npm run build && node factory/scripts/benchmark-render.mjs",
     "style:review": "node factory/scripts/build-style-review-package.mjs",
     "style:prototype:seed-c": "npm run build && node factory/scripts/seed-style-prototype-c.mjs",
     "verify:modules": "npm run build && node factory/scripts/verify-module-render.mjs",

@@ -73,9 +73,15 @@ npm run style -- check --project synthetic-module-pixel-demo --workspace <extern
 npm run style:verify
 npm run style:media:verify
 npm run style:gallery:seed -- --workspace <external-workspace>
+npm run style:starter:seed -- --workspace <external-workspace> --set ink|editorial|diorama
+npm run perf:render -- --workspace <external-workspace> --project <id> --frames 0-47
 ```
 
 `style:verify` renders all six registered styles through one shared self-contained module in a disposable synthetic workspace, compares every style pair on decoded pixels and edge structure (not just metadata), checks deterministic repeat output and verifies that an unknown style is refused without writing an output file. `style:media:verify` adds the mixed Canvas/Video/Hybrid/2.5D timeline with decoded per-depth displacement evidence.
+
+`perf:render` is a local diagnostic: it measures wall-clock time for a fixed short range through the real render path and reports `msPerFrame`. It includes browser/render startup, so compare like-for-like runs on the same host and range; it is not a pass/fail gate.
+
+Two static-layer caches keep repeated frames cheaper without changing pixels: `layered-canvas` caches the full-size gradient background per size/palette, and `parallax-2p5d` caches the static grade tint/vignette/grain layer per size/grade. Camera, atmosphere, rain, sweep and other frame-dependent drawing remain per-frame. When `document` is unavailable, both paths fall back to direct drawing; renderer code never requires DOM access in the Node-side tests.
 
 ## Output override policy
 

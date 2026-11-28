@@ -147,20 +147,44 @@ const drawRainAndMist = (
   }
 };
 
-const drawGradeOverlay = (
-  ctx: CanvasRenderingContext2D,
-  frame: number,
-  plan: ParallaxPlan,
-): void => {
-  const {grade, width, height} = plan;
+const gradeOverlayCache = new Map<string, HTMLCanvasElement>();
+
+const gradeOverlayKey = (width: number, height: number, grade: GradeConfig): string =>
+  [
+    width,
+    height,
+    grade.saturation,
+    grade.contrast,
+    grade.brightness,
+    grade.tint,
+    grade.tintOpacity,
+    grade.vignette,
+    grade.grain,
+  ].join('|');
+
+const cachedGradeOverlay = (
+  width: number,
+  height: number,
+  grade: GradeConfig,
+): HTMLCanvasElement | null => {
+  if (typeof document === 'undefined') return null;
+  const key = gradeOverlayKey(width, height, grade);
+  const existing = gradeOverlayCache.get(key);
+  if (existing) return existing;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  if (!context) return null;
+
   if (grade.tintOpacity > 0) {
-    ctx.globalAlpha = grade.tintOpacity;
-    ctx.fillStyle = grade.tint;
-    ctx.fillRect(0, 0, width, height);
-    ctx.globalAlpha = 1;
+    context.globalAlpha = grade.tintOpacity;
+    context.fillStyle = grade.tint;
+    context.fillRect(0, 0, width, height);
+    context.globalAlpha = 1;
   }
   if (grade.vignette > 0) {
-    const gradient = ctx.createRadialGradient(
+    const gradient = context.createRadialGradient(
       width * 0.5,
       height * 0.48,
       Math.min(width, height) * 0.2,
@@ -170,20 +194,65 @@ const drawGradeOverlay = (
     );
     gradient.addColorStop(0, 'rgba(0,0,0,0)');
     gradient.addColorStop(1, `rgba(0,0,0,${grade.vignette})`);
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, width, height);
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, width, height);
   }
   if (grade.grain > 0) {
-    // Position-seeded grain: identical every frame, so renders stay reproducible.
     const cells = Math.floor((width * height) / 2600);
-    ctx.fillStyle = grade.tint;
-    ctx.globalAlpha = grade.grain;
+    context.fillStyle = grade.tint;
+    context.globalAlpha = grade.grain;
     for (let index = 0; index < cells; index += 1) {
       const x = Math.floor(hashNoise(index * 1.37) * width);
       const y = Math.floor(hashNoise(index * 2.69) * height);
-      ctx.fillRect(x, y, 1, 1);
+      context.fillRect(x, y, 1, 1);
     }
-    ctx.globalAlpha = 1;
+    context.globalAlpha = 1;
+  }
+  gradeOverlayCache.set(key, canvas);
+  return canvas;
+};
+
+const drawGradeOverlay = (
+  ctx: CanvasRenderingContext2D,
+  frame: number,
+  plan: ParallaxPlan,
+): void => {
+  const {grade, width, height} = plan;
+  const cached = cachedGradeOverlay(width, height, grade);
+  if (cached) {
+    ctx.drawImage(cached, 0, 0, width, height);
+  } else {
+    if (grade.tintOpacity > 0) {
+      ctx.globalAlpha = grade.tintOpacity;
+      ctx.fillStyle = grade.tint;
+      ctx.fillRect(0, 0, width, height);
+      ctx.globalAlpha = 1;
+    }
+    if (grade.vignette > 0) {
+      const gradient = ctx.createRadialGradient(
+        width * 0.5,
+        height * 0.48,
+        Math.min(width, height) * 0.2,
+        width * 0.5,
+        height * 0.5,
+        Math.hypot(width, height) * 0.62,
+      );
+      gradient.addColorStop(0, 'rgba(0,0,0,0)');
+      gradient.addColorStop(1, `rgba(0,0,0,${grade.vignette})`);
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, width, height);
+    }
+    if (grade.grain > 0) {
+      const cells = Math.floor((width * height) / 2600);
+      ctx.fillStyle = grade.tint;
+      ctx.globalAlpha = grade.grain;
+      for (let index = 0; index < cells; index += 1) {
+        const x = Math.floor(hashNoise(index * 1.37) * width);
+        const y = Math.floor(hashNoise(index * 2.69) * height);
+        ctx.fillRect(x, y, 1, 1);
+      }
+      ctx.globalAlpha = 1;
+    }
   }
   const sweep = plan.light.sweep;
   if (sweep) {

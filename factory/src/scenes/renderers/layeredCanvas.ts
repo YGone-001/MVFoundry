@@ -6,6 +6,34 @@ const hash = (n: number): number => {
   return value - Math.floor(value);
 };
 
+// Static background canvases are invariant for a given size and palette.
+// Keep the cache small and browser-only so Node-side tests keep the fallback.
+const backgroundCache = new Map<string, HTMLCanvasElement>();
+
+const cachedBackground = (
+  width: number,
+  height: number,
+  background: string,
+  accent: string,
+): HTMLCanvasElement | null => {
+  if (typeof document === 'undefined') return null;
+  const key = `${width}x${height}|${background}|${accent}`;
+  const existing = backgroundCache.get(key);
+  if (existing) return existing;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  if (!context) return null;
+  const gradient = context.createLinearGradient(0, 0, width, height);
+  gradient.addColorStop(0, background);
+  gradient.addColorStop(1, accent);
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, width, height);
+  backgroundCache.set(key, canvas);
+  return canvas;
+};
+
 export const layeredCanvasRenderer: SceneRenderer = {
   kind: 'layered-canvas',
   canvasSize: (project) => ({width: project.output.width, height: project.output.height}),
@@ -29,11 +57,16 @@ export const layeredCanvasRenderer: SceneRenderer = {
 
     ctx.clearRect(0, 0, width, height);
     if (!hasImage) {
-      const gradient = ctx.createLinearGradient(0, 0, width, height);
-      gradient.addColorStop(0, background);
-      gradient.addColorStop(1, accent);
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, width, height);
+      const cached = cachedBackground(width, height, background, accent);
+      if (cached) {
+        ctx.drawImage(cached, 0, 0, width, height);
+      } else {
+        const gradient = ctx.createLinearGradient(0, 0, width, height);
+        gradient.addColorStop(0, background);
+        gradient.addColorStop(1, accent);
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, width, height);
+      }
     } else {
       const wash = ctx.createLinearGradient(0, 0, 0, height);
       wash.addColorStop(0, `rgba(5, 8, 13, ${washTop})`);

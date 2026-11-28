@@ -389,6 +389,7 @@ node factory/scripts/mv-project.mjs attach-style \
 | `npm run style:art` | Procedural plates: cinematic/anime prototypes plus ink/editorial starter packs |
 | `npm run style:gallery:seed` | Seed six runnable synthetic projects, one per registered style, in an external workspace |
 | `npm run style:starter:seed` | Seed a 15-second four-shot starter prototype for ink, editorial or diorama |
+| `npm run perf:render` | Measure wall time and ms/frame for a fixed short render range |
 | `npm run verify:modules` | Module bundling and still-render evidence |
 | `npm run audit:git` / `audit:publication` | Media-in-Git audit and publication allowlist audit |
 
