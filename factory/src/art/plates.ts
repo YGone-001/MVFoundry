@@ -30,11 +30,6 @@ import {
   drawEditorialGraphicsForeground,
   drawEditorialGridBackground,
 } from './editorialPlates';
-import {
-  drawDioramaForeground,
-  drawDioramaMidground,
-  drawDioramaStageBackground,
-} from './dioramaPlates';
 
 export type ArtPlateSpec = {
   name: string;
@@ -243,30 +238,6 @@ export const ART_PLATES: readonly ArtPlateSpec[] = Object.freeze([
     opaque: false,
     note: 'Editorial starter: type-like bars, arrow, counter and baseline rules',
     draw: drawEditorialGraphicsForeground,
-  },
-  {
-    name: 'diorama-bg-stage',
-    width: 1920,
-    height: 1080,
-    opaque: true,
-    note: 'Diorama starter: dark surround, isometric stage and soft contact shadow',
-    draw: drawDioramaStageBackground,
-  },
-  {
-    name: 'diorama-mg-shelter',
-    width: 1920,
-    height: 1080,
-    opaque: false,
-    note: 'Diorama starter: shelter, warm lamp practical and two miniature figures',
-    draw: drawDioramaMidground,
-  },
-  {
-    name: 'diorama-fg-rail',
-    width: 1920,
-    height: 1080,
-    opaque: false,
-    note: 'Diorama starter: foreground rail and tilt-shift frame',
-    draw: drawDioramaForeground,
   },
   ...CHARACTER_PLATES,
 ]);

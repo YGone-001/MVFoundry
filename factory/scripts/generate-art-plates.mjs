@@ -6,7 +6,7 @@
 //
 // Usage:
 //   node factory/scripts/generate-art-plates.mjs --workspace <root> --project <id> --set cinematic
-// Sets: cinematic | anime | actor | ink | editorial | diorama | all
+// Sets: cinematic | anime | actor | ink | editorial | all
 // Requires factory/dist built and a local Chrome/Chromium for Remotion.
 
 import {createHash} from 'node:crypto';
@@ -32,8 +32,8 @@ if (!workspaceRoot || !projectId) {
   console.error('--workspace and --project are required');
   process.exit(2);
 }
-if (!['cinematic', 'anime', 'actor', 'ink', 'editorial', 'diorama', 'all'].includes(set)) {
-  console.error('--set must be cinematic, anime, actor, ink, editorial, diorama or all');
+if (!['cinematic', 'anime', 'actor', 'ink', 'editorial', 'all'].includes(set)) {
+  console.error('--set must be cinematic, anime, actor, ink, editorial or all');
   process.exit(2);
 }
 

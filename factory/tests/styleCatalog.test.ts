@@ -28,6 +28,7 @@ import {
 } from '../src/style/themes';
 import type {RenderProjectSnapshot, RenderProjectShot} from '../src/config/types';
 import {DEFAULT_RENDER_PROJECT} from '../src/remotion/defaultProject';
+import {ART_PLATES} from '../src/art/plates';
 import type {SceneFrameInfo} from '../src/timeline/frameClock';
 import {REPO_ROOT} from './helpers';
 
@@ -396,5 +397,23 @@ test('the default Remotion composition is not pixel-only', () => {
       assert.equal(shot.renderer, 'layered-canvas');
     }
   }
+});
+
+test('starter plate packs match the media routes that can bind them', () => {
+  // ink and editorial declare a parallax route and therefore ship starter cutouts.
+  for (const prefix of ['ink', 'editorial']) {
+    assert.equal(
+      ART_PLATES.filter((plate) => plate.name.startsWith(`${prefix}-`)).length,
+      3,
+      `${prefix} should ship exactly one background and two cutouts`,
+    );
+  }
+  // diorama declares no parallax route; a plate pack would be unbindable.
+  assert.equal(ART_PLATES.some((plate) => plate.name.startsWith('diorama-')), false);
+  const diorama = assertRegisteredStyle('stylized-3d-diorama');
+  assert.equal(
+    diorama.mediaRoutes.some((route) => route.renderer === 'parallax-2p5d'),
+    false,
+  );
 });
 
